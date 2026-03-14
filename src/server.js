@@ -7,6 +7,9 @@ import connectDB from "./config/db.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import workspaceRoutes from "./routes/workspace.routes.js";
+import channelRoutes from "./routes/channel.routes.js";
+import messageRoutes from "./routes/message.routes.js";
+import onlineUsers from "./sockets/presence.js";
 
 dotenv.config();
 
@@ -19,11 +22,71 @@ const io = new Server(server, {
   },
 });
 
+io.on("connection", (socket) => {
+  socket.on("user_online", (userId) => {
+
+    onlineUsers.set(userId, socket.id);
+
+    io.emit("presence_update", {
+      userId,
+      status: "online"
+    });
+      });
+
+  console.log("User connected:", socket.id);
+
+
+  /* JOIN CHANNEL */
+  socket.on("join_channel", (channelId) => {
+    socket.join(channelId);
+  });
+
+  /* SEND MESSAGE */
+  socket.on("send_message", (data) => {
+
+    const { channelId, message } = data;
+
+    io.to(channelId).emit("receive_message", message);
+  });
+
+   /* USER TYPING */
+  socket.on("typing", ({ channelId, user }) => {
+    socket.to(channelId).emit("user_typing", user);
+  });
+
+  /* STOP TYPING */
+  socket.on("stop_typing", ({ channelId, user }) => {
+    socket.to(channelId).emit("user_stop_typing", user);
+  });
+
+  socket.on("disconnect", () => {
+    console.log("User disconnected:", socket.id);
+        for (let [userId, socketId] of onlineUsers) {
+
+      if (socketId === socket.id) {
+
+        onlineUsers.delete(userId);
+
+        io.emit("presence_update", {
+          userId,
+          status: "offline"
+        });
+
+      }
+
+    }
+
+  });
+
+});
+
 app.use(cors());
 app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/workspaces", workspaceRoutes);
+app.use("/api/channels", channelRoutes);
+app.use("/api/messages", messageRoutes);
 
 
 connectDB();
