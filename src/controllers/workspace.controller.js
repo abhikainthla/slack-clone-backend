@@ -1,4 +1,7 @@
 import Workspace from "../models/Workspace.js";
+import crypto from "crypto";
+import Invitation from "../models/Invitation.js";
+import { sendEmail } from "../utils/sendEmail.js";
 
 /* CREATE WORKSPACE */
 export const createWorkspace = async (req, res) => {
@@ -67,4 +70,34 @@ export const getWorkspaceById = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
+};
+
+
+/* INVITE TO WORKSPACE */
+
+export const inviteToWorkspace = async (req, res) => {
+
+  const { email } = req.body;
+  const { workspaceId } = req.params;
+
+  const token = crypto.randomBytes(32).toString("hex");
+
+  const invite = await Invitation.create({
+    email,
+    workspace: workspaceId,
+    invitedBy: req.user._id,
+    token
+  });
+
+  const inviteLink = `${process.env.FRONTEND_URL}/invite/${token}`;
+
+  await sendEmail(
+    email,
+    "Workspace Invitation",
+    `<p>You were invited to join a workspace.</p>
+     <a href="${inviteLink}">Accept Invitation</a>`
+  );
+
+  res.json({ message: "Invitation sent" });
+
 };

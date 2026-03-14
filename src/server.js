@@ -10,6 +10,8 @@ import workspaceRoutes from "./routes/workspace.routes.js";
 import channelRoutes from "./routes/channel.routes.js";
 import messageRoutes from "./routes/message.routes.js";
 import onlineUsers from "./sockets/presence.js";
+import bookmarkRoutes from "./routes/bookmark.routes.js";
+import { apiLimiter } from "./middleware/rateLimit.middleware.js";
 
 dotenv.config();
 
@@ -59,6 +61,16 @@ io.on("connection", (socket) => {
     socket.to(channelId).emit("user_stop_typing", user);
   });
 
+  /* NOTIFICATION */
+  socket.on("new_notification", (userId, notification) => {
+  const socketId = onlineUsers.get(userId);
+
+  if (socketId) {
+    io.to(socketId).emit("receive_notification", notification);
+  }
+});
+
+
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
         for (let [userId, socketId] of onlineUsers) {
@@ -87,6 +99,8 @@ app.use("/api/users", userRoutes);
 app.use("/api/workspaces", workspaceRoutes);
 app.use("/api/channels", channelRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/bookmarks", bookmarkRoutes);
+app.use("/api", apiLimiter);
 
 
 connectDB();

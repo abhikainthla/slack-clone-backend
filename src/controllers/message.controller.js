@@ -1,5 +1,7 @@
 import Message from "../models/Message.js";
 import ChannelMember from "../models/ChannelMember.js";
+import Notification from "../models/Notification.js";
+import User from "../models/User.js";
 
 /* SEND MESSAGE */
 export const sendMessage = async (req, res) => {
@@ -7,24 +9,36 @@ export const sendMessage = async (req, res) => {
 
     const { channelId, content } = req.body;
 
-    if (!channelId || !content) {
-      return res.status(400).json({
-        message: "channelId and content required",
-      });
-    }
-
     const message = await Message.create({
       channel: channelId,
       sender: req.user._id,
       content,
     });
 
-    const populatedMessage = await message.populate(
-      "sender",
-      "name email avatar"
-    );
+    /* MENTION DETECTION */
+    const mentions = content.match(/@(\w+)/g);
 
-    res.status(201).json(populatedMessage);
+    if (mentions) {
+
+      for (let mention of mentions) {
+
+        const username = mention.replace("@", "");
+
+        const user = await User.findOne({ username });
+
+        if (user) {
+
+          await Notification.create({
+            user: user._id,
+            message: message._id,
+            type: "mention",
+          });
+
+        }
+      }
+    }
+
+    res.status(201).json(message);
 
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -103,17 +117,25 @@ export const editMessage = async (req, res) => {
 
     if (!message) {
       return res.status(404).json({
-        message: "Message not found",
+        message: "Message not found"
       });
     }
 
     if (message.sender.toString() !== req.user._id.toString()) {
       return res.status(403).json({
-        message: "Not authorized to edit",
+        message: "Not authorized"
       });
     }
 
+    /* SAVE OLD VERSION */
+    message.editHistory.push({
+      content: message.content,
+      editedAt: new Date()
+    });
+
     message.content = content;
+    message.edited = true;
+
     await message.save();
 
     res.json(message);
@@ -122,6 +144,20 @@ export const editMessage = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+
+/* GET EDIT HISTORY */
+
+export const getEditHistory = async (req, res) => {
+
+  const { messageId } = req.params;
+
+  const message = await Message.findById(messageId);
+
+  res.json(message.editHistory);
+
+};
+
 
 
 /* REPLY TO MESSAGE */
@@ -188,4 +224,115 @@ export const markChannelRead = async (req, res) => {
   );
 
   res.json(member);
+};
+
+
+/* SEARCH MESSAGES */
+
+export const searchMessages = async (req, res) => {
+  try {
+
+    const { q } = req.query;
+
+    if (!q) {
+      return res.status(400).json({
+        message: "Search query required",
+      });
+    }
+
+    const messages = await Message.find({
+      $text: { $search: q }
+    })
+      .populate("sender", "name email avatar")
+      .limit(20)
+      .sort({ createdAt: -1 });
+
+    res.json(messages);
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+/* PIN MESSAGES */
+export const pinMessage = async (req, res) => {
+  try {
+
+    const { messageId } = req.params;
+
+    const message = await Message.findByIdAndUpdate(
+      messageId,
+      { pinned: true },
+      { new: true }
+    );
+
+    res.json(message);
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+/* UNPIN MESSAGES */
+export const unpinMessage = async (req, res) => {
+  try {
+
+    const { messageId } = req.params;
+
+    const message = await Message.findByIdAndUpdate(
+      messageId,
+      { pinned: false },
+      { new: true }
+    );
+
+    res.json(message);
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+/* GET ALL PINNED MESSAGES */
+export const getPinnedMessages = async (req, res) => {
+  try {
+
+    const { channelId } = req.params;
+
+    const messages = await Message.find({
+      channel: channelId,
+      pinned: true
+    })
+      .populate("sender", "name");
+
+    res.json(messages);
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+
+/* MARK MESSAGE READ */
+export const markMessageRead = async (req, res) => {
+
+  const { messageId } = req.params;
+
+  const message = await Message.findByIdAndUpdate(
+    messageId,
+    {
+      $addToSet: {
+        readBy: {
+          user: req.user._id,
+          readAt: new Date()
+        }
+      }
+    },
+    { new: true }
+  );
+
+  res.json(message);
 };
