@@ -13,6 +13,20 @@ const channelSchema = new mongoose.Schema(
       ref: "Workspace",
       required: true,
     },
+    roles: {
+      admins: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+      ],
+      moderators: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+      ],
+    },
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

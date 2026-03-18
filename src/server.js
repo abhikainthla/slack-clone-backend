@@ -92,7 +92,13 @@ io.on("connection", (socket) => {
 
 });
 
-app.use(cors());
+
+app.use(
+  cors({
+    origin: "http://localhost:5173", // your frontend URL
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
