@@ -2,10 +2,16 @@ import mongoose from "mongoose";
 
 const workspaceSchema = new mongoose.Schema(
   {
-    name: {
+    name: { type: String, required: true },
+
+    description: {
       type: String,
-      required: true,
-      trim: true,
+      default: "",
+    },
+
+    color: {
+      type: String,
+      default: "bg-purple-500",
     },
 
     owner: {
@@ -14,19 +20,18 @@ const workspaceSchema = new mongoose.Schema(
       required: true,
     },
 
-    members: [
-      {
-        user: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: "User",
-        },
-        role: {
-          type: String,
-          enum: ["admin", "member"],
-          default: "member",
-        },
-      },
-    ],
+
+members: [
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    role: {
+      type: String,
+      enum: ["admin", "moderator", "member"],
+      default: "member",
+    },
+  },
+],
+
   },
   { timestamps: true }
 );

@@ -2,12 +2,16 @@ import Workspace from "../models/Workspace.js";
 import crypto from "crypto";
 import Invitation from "../models/Invitation.js";
 import { sendEmail } from "../utils/sendEmail.js";
+import Notification from "../models/Notification.js";
+import Channel from "../models/Channel.js";
+
 
 /* CREATE WORKSPACE */
 export const createWorkspace = async (req, res) => {
   try {
 
-    const { name } = req.body || {};
+
+const { name, description, color } = req.body;
 
     if (!name) {
       return res.status(400).json({
@@ -15,16 +19,18 @@ export const createWorkspace = async (req, res) => {
       });
     }
 
-    const workspace = await Workspace.create({
-      name,
-      owner: req.user._id,
-      members: [
-        {
-          user: req.user._id,
-          role: "admin",
-        },
-      ],
-    });
+const workspace = await Workspace.create({
+  name,
+  description,
+  color,
+  owner: req.user._id,
+  members: [
+    {
+      user: req.user._id,
+      role: "admin",
+    },
+  ],
+});
 
     res.status(201).json(workspace);
 
@@ -100,4 +106,119 @@ export const inviteToWorkspace = async (req, res) => {
 
   res.json({ message: "Invitation sent" });
 
+};
+
+
+/* ACCEPT WORKSPACE */
+export const acceptInvite = async (req, res) => {
+  try {
+    const invite = await Invitation.findOne({ token: req.params.token });
+
+    if (!invite || invite.accepted) {
+      return res.status(400).json({ message: "Invalid invite" });
+    }
+
+    const workspace = await Workspace.findById(invite.workspace);
+
+    workspace.members.push({
+      user: req.user._id,
+      role: "member",
+    });
+
+    await workspace.save();
+
+    invite.accepted = true;
+    await invite.save();
+
+    res.json({ message: "Joined workspace" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+/* REMOVE MEMBER */
+export const removeMember = async (req, res) => {
+  try {
+    const { id, userId } = req.params;
+
+    const workspace = await Workspace.findById(id);
+
+    workspace.members = workspace.members.filter(
+      (m) => m.user.toString() !== userId
+    );
+
+    await workspace.save();
+
+    res.json({ message: "Member removed" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+
+/* UPDATE WORKSPACE */
+export const updateWorkspace = async (req, res) => {
+  try {
+    const { name, description, color } = req.body;
+
+    const workspace = await Workspace.findByIdAndUpdate(
+      req.params.id,
+      { name, description, color },
+      { new: true }
+    );
+
+    res.json(workspace);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+/* DELETE WORKSPACE */
+export const deleteWorkspace = async (req, res) => {
+  try {
+    await Workspace.findByIdAndDelete(req.params.id);
+    res.json({ message: "Workspace deleted" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+/* MARK WORKSPACE AS READ*/
+export const markWorkspaceRead = async (req, res) => {
+  try {
+    await Notification.updateMany(
+      {
+        user: req.user._id,
+      },
+      { read: true }
+    );
+
+    res.json({ message: "All notifications marked as read" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+/* FILTER CHANNELS*/
+export const filterChannels = async (req, res) => {
+  const { type, sort } = req.query;
+
+  let channels = await Channel.find({
+    workspace: req.params.id,
+  });
+
+  if (sort === "az") {
+    channels.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  if (sort === "recent") {
+    channels.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  res.json(channels);
 };
