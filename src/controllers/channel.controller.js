@@ -308,3 +308,21 @@ export const removeModerator = async (req, res) => {
     res.status(500).json({ message: "Failed" });
   }
 };
+
+
+export const getChannelMembers = async (req, res) => {
+  try {
+    const { channelId } = req.params;
+
+    const channel = await Channel.findById(channelId)
+      .populate("members", "username name email");
+
+    if (!channel) {
+      return res.status(404).json({ message: "Channel not found" });
+    }
+
+    res.json(channel.members); // ✅ only members
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};

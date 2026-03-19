@@ -2,6 +2,8 @@ import Message from "../models/Message.js";
 import ChannelMember from "../models/ChannelMember.js";
 import Notification from "../models/Notification.js";
 import User from "../models/User.js";
+import cloudinary from "../utils/cloudinary.js";
+import fs from "fs";
 
 /* SEND MESSAGE */
 export const sendMessage = async (req, res) => {
@@ -78,31 +80,48 @@ export const getChannelMessages = async (req, res) => {
 
 export const addReaction = async (req, res) => {
   try {
-
     const { messageId } = req.params;
     const { emoji } = req.body;
 
     const message = await Message.findById(messageId);
 
     if (!message) {
-      return res.status(404).json({
-        message: "Message not found",
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    // find existing reaction by this user
+    const existingIndex = message.reactions.findIndex(
+      (r) => r.user.toString() === req.user._id.toString()
+    );
+
+    if (existingIndex !== -1) {
+      // user already reacted
+      const existingReaction = message.reactions[existingIndex];
+
+      if (existingReaction.emoji === emoji) {
+        // same emoji → remove (toggle off)
+        message.reactions.splice(existingIndex, 1);
+      } else {
+        // different emoji → replace
+        message.reactions[existingIndex].emoji = emoji;
+      }
+    } else {
+      // no reaction → add new
+      message.reactions.push({
+        user: req.user._id,
+        emoji,
       });
     }
 
-    message.reactions.push({
-      user: req.user._id,
-      emoji,
-    });
-
     await message.save();
-
     res.json(message);
 
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
+
 
 
 /* EDIT MESSAGE */
@@ -186,21 +205,39 @@ export const replyToMessage = async (req, res) => {
 
 export const uploadFile = async (req, res) => {
   try {
+    console.log("📁 FILE:", req.file);
+    
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
 
-    const result = await cloudinary.uploader.upload_stream(
-      { resource_type: "auto" },
-      (error, result) => {
-        if (error) {
-          return res.status(500).json({ error });
-        }
+    // ✅ UPLOAD TO CLOUDINARY
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      resource_type: "auto",
+      folder: "slack-clone",
+    });
 
-        res.json({
-          url: result.secure_url
-        });
-      }
-    );
+    console.log("✅ UPLOADED:", result.secure_url);
+
+    // ✅ DELETE LOCAL FILE (SYNC - NO CALLBACK NEEDED)
+    if (fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+      console.log("🗑️ Local file deleted");
+    }
+
+    res.json({
+      url: result.secure_url,
+      public_id: result.public_id,
+    });
 
   } catch (error) {
+    console.error("❌ UPLOAD ERROR:", error.message);
+    
+    // ✅ CLEANUP ON ERROR (sync)
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
     res.status(500).json({ message: error.message });
   }
 };

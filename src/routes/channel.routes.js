@@ -11,6 +11,7 @@ import {
   inviteToChannel,
   addModerator,
   removeModerator,
+  getChannelMembers,
 } from "../controllers/channel.controller.js";
 
 const router = express.Router();
@@ -42,5 +43,8 @@ router.post("/moderator/:channelId", protect, addModerator);
 /* REMOVE MODERATOR */
 
 router.delete("/moderator/:channelId", protect, removeModerator);
+
+/* GET CHANNEL MEMBERS */
+router.get("/:channelId/members", protect, getChannelMembers);
 
 export default router;

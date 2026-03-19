@@ -82,31 +82,46 @@ export const getWorkspaceById = async (req, res) => {
 /* INVITE TO WORKSPACE */
 
 export const inviteToWorkspace = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const { workspaceId } = req.params;
 
-  const { email } = req.body;
-  const { workspaceId } = req.params;
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
 
-  const token = crypto.randomBytes(32).toString("hex");
+    const token = crypto.randomBytes(32).toString("hex");
 
-  const invite = await Invitation.create({
-    email,
-    workspace: workspaceId,
-    invitedBy: req.user._id,
-    token
-  });
+    const invite = await Invitation.create({
+      email,
+      workspace: workspaceId,
+      invitedBy: req.user._id,
+      token,
+    });
 
-  const inviteLink = `${process.env.FRONTEND_URL}/invite/${token}`;
+    const inviteLink = `${process.env.FRONTEND_URL}/invite/${token}`;
 
-  await sendEmail(
-    email,
-    "Workspace Invitation",
-    `<p>You were invited to join a workspace.</p>
-     <a href="${inviteLink}">Accept Invitation</a>`
-  );
+    // 🔥 wrap email in try-catch
+    try {
+      await sendEmail(
+        email,
+        "Workspace Invitation",
+        `<p>You were invited to join a workspace.</p>
+         <a href="${inviteLink}">Accept Invitation</a>`
+      );
+    } catch (emailErr) {
+      console.error("Email error:", emailErr.message);
+      // still allow invite creation
+    }
 
-  res.json({ message: "Invitation sent" });
+    res.json({ message: "Invitation sent", invite });
 
+  } catch (error) {
+    console.error("Invite error:", error); // 🔥 LOG THIS
+    res.status(500).json({ message: error.message });
+  }
 };
+
 
 
 /* ACCEPT WORKSPACE */
