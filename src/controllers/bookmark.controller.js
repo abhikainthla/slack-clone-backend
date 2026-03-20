@@ -1,71 +1,54 @@
-import Bookmark from "../models/Bookmark.js";
+import Message from "../models/Message.js";
 
-/* ---------------- ADD BOOKMARK (PREVENT DUPLICATE) ---------------- */
-export const bookmarkMessage = async (req, res) => {
+/* TOGGLE BOOKMARK */
+export const toggleBookmark = async (req, res) => {
   try {
     const { messageId } = req.params;
+    const userId = req.user._id;
 
-    // 🔍 check if already bookmarked
-    const existing = await Bookmark.findOne({
-      user: req.user._id,
-      message: messageId,
-    });
+    // ✅ POPULATE channel to avoid undefined error
+    const message = await Message.findById(messageId)
+      .populate("channel", "_id")  // Just need channel ID
+      .populate("sender", "name email avatar");
 
-    if (existing) {
-      return res.status(400).json({
-        message: "Message already bookmarked",
-      });
+    if (!message) return res.status(404).json({ message: "Message not found" });
+
+    const index = message.bookmarkedBy.findIndex(
+      (id) => id.toString() === userId.toString()
+    );
+
+    if (index !== -1) {
+      message.bookmarkedBy.splice(index, 1);
+    } else {
+      message.bookmarkedBy.push(userId);
     }
 
-    const bookmark = await Bookmark.create({
-      user: req.user._id,
-      message: messageId,
+    await message.save();
+
+    //  Emit correct socket event that frontend expects
+    req.io.to(message.channel._id.toString()).emit("bookmark_update", {
+      messageId: message._id,
+      bookmarkedBy: message.bookmarkedBy,
+      channelId: message.channel._id
     });
 
-    res.status(201).json(bookmark);
+    res.json(message);
   } catch (err) {
+    console.error("Bookmark Error:", err);
     res.status(500).json({ message: err.message });
   }
 };
 
-/* ---------------- GET BOOKMARKS ---------------- */
+/* GET BOOKMARKS */
 export const getBookmarks = async (req, res) => {
   try {
-    const bookmarks = await Bookmark.find({
-      user: req.user._id,
+    const messages = await Message.find({
+      bookmarkedBy: req.user._id,
     })
-      .populate({
-        path: "message",
-        populate: {
-          path: "sender",
-          select: "name email",
-        },
-      })
+      .populate("sender", "name email avatar")
       .sort({ createdAt: -1 });
 
-    res.json(bookmarks);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
-
-/* ---------------- REMOVE BOOKMARK ---------------- */
-export const removeBookmark = async (req, res) => {
-  try {
-    const { messageId } = req.params;
-
-    const deleted = await Bookmark.findOneAndDelete({
-      user: req.user._id,
-      message: messageId,
-    });
-
-    if (!deleted) {
-      return res.status(404).json({
-        message: "Bookmark not found",
-      });
-    }
-
-    res.json({ message: "Bookmark removed" });
+    res.json(messages);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

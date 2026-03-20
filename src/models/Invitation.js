@@ -1,24 +1,25 @@
 import mongoose from "mongoose";
 
 const invitationSchema = new mongoose.Schema({
-
-  email: String,
-
   workspace: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Workspace"
+    ref: "Workspace",
+    required: true
   },
-
   invitedBy: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "User"
+    ref: "User",
+    required: true
   },
-
-  token: String,
-
-  accepted: {
-    type: Boolean,
-    default: false
+  token: {
+    type: String,
+    unique: true,
+    required: true
+  },
+  // expiration date for the link
+  expiresAt: {
+    type: Date,
+    default: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   }
 
 }, { timestamps: true });

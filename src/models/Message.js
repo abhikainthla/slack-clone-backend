@@ -71,6 +71,13 @@ const messageSchema = new mongoose.Schema(
         emoji: String,
       },
     ],
+    bookmarkedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
   },
   { timestamps: true }
 );

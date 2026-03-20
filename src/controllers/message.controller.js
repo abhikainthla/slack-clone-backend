@@ -83,30 +83,23 @@ export const addReaction = async (req, res) => {
     const { messageId } = req.params;
     const { emoji } = req.body;
 
-    const message = await Message.findById(messageId);
+     const message = await Message.findById(messageId).populate("channel", "_id");
 
     if (!message) {
       return res.status(404).json({ message: "Message not found" });
     }
 
-    // find existing reaction by this user
     const existingIndex = message.reactions.findIndex(
       (r) => r.user.toString() === req.user._id.toString()
     );
 
     if (existingIndex !== -1) {
-      // user already reacted
-      const existingReaction = message.reactions[existingIndex];
-
-      if (existingReaction.emoji === emoji) {
-        // same emoji → remove (toggle off)
+      if (message.reactions[existingIndex].emoji === emoji) {
         message.reactions.splice(existingIndex, 1);
       } else {
-        // different emoji → replace
         message.reactions[existingIndex].emoji = emoji;
       }
     } else {
-      // no reaction → add new
       message.reactions.push({
         user: req.user._id,
         emoji,
@@ -114,12 +107,24 @@ export const addReaction = async (req, res) => {
     }
 
     await message.save();
-    res.json(message);
 
+     req.io.to(message.channel._id.toString()).emit("reaction_update", {
+      messageId: message._id,
+      reactions: message.reactions,
+      channelId: message.channel._id
+    });
+
+    // ✅ Populate sender for UI
+    const populatedMessage = await Message.findById(messageId)
+      .populate("sender", "name email avatar")
+      .populate("channel", "_id");
+
+    res.json(populatedMessage);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 
 
@@ -205,13 +210,12 @@ export const replyToMessage = async (req, res) => {
 
 export const uploadFile = async (req, res) => {
   try {
-    console.log("📁 FILE:", req.file);
     
     if (!req.file) {
       return res.status(400).json({ message: "No file uploaded" });
     }
 
-    // ✅ UPLOAD TO CLOUDINARY
+    //  UPLOAD TO CLOUDINARY
     const result = await cloudinary.uploader.upload(req.file.path, {
       resource_type: "auto",
       folder: "slack-clone",
@@ -219,7 +223,6 @@ export const uploadFile = async (req, res) => {
 
     console.log("✅ UPLOADED:", result.secure_url);
 
-    // ✅ DELETE LOCAL FILE (SYNC - NO CALLBACK NEEDED)
     if (fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
       console.log("🗑️ Local file deleted");
@@ -295,41 +298,63 @@ export const searchMessages = async (req, res) => {
 /* PIN MESSAGES */
 export const pinMessage = async (req, res) => {
   try {
-
     const { messageId } = req.params;
-
+    
+    // ✅ Populate channel and sender
     const message = await Message.findByIdAndUpdate(
       messageId,
       { pinned: true },
       { new: true }
-    );
+    )
+    .populate("channel", "_id")
+    .populate("sender", "name email avatar");
+
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    // ✅ Emit correct socket event
+    req.io.to(message.channel._id.toString()).emit("pin_update", {
+      messageId: message._id,
+      pinned: true,
+      channelId: message.channel._id
+    });
 
     res.json(message);
-
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-
 /* UNPIN MESSAGES */
 export const unpinMessage = async (req, res) => {
   try {
-
     const { messageId } = req.params;
 
     const message = await Message.findByIdAndUpdate(
       messageId,
       { pinned: false },
       { new: true }
-    );
+    )
+    .populate("channel", "_id")
+    .populate("sender", "name email avatar");
+
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    req.io.to(message.channel._id.toString()).emit("pin_update", {
+      messageId: message._id,
+      pinned: false,
+      channelId: message.channel._id
+    });
 
     res.json(message);
-
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 
 /* GET ALL PINNED MESSAGES */
@@ -355,7 +380,6 @@ export const getPinnedMessages = async (req, res) => {
 
 /* MARK MESSAGE READ */
 export const markMessageRead = async (req, res) => {
-
   const { messageId } = req.params;
 
   const message = await Message.findByIdAndUpdate(
@@ -364,12 +388,21 @@ export const markMessageRead = async (req, res) => {
       $addToSet: {
         readBy: {
           user: req.user._id,
-          readAt: new Date()
-        }
-      }
+          readAt: new Date(),
+        },
+      },
     },
     { new: true }
   );
 
+
+  //  emit socket event
+    req.io.to(message.channel.toString()).emit("message_read_update", {
+      messageId,
+      userId: req.user._id,
+    });
+
+
   res.json(message);
 };
+

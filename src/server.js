@@ -26,16 +26,30 @@ const io = new Server(server, {
 
 io.on("connection", (socket) => {
   socket.on("user_online", (userId) => {
+      if (!onlineUsers.has(userId)) {
+        onlineUsers.set(userId, new Set());
+      }
 
-    onlineUsers.set(userId, socket.id);
+      onlineUsers.get(userId).add(socket.id);
 
-    io.emit("presence_update", {
-      userId,
-      status: "online"
-    });
+      io.emit("presence_update", {
+        userId,
+        status: "online",
       });
+    });
+
 
   console.log("User connected:", socket.id);
+
+  socket.on("get_online_users", () => {
+  const users = [];
+
+  for (let [userId] of onlineUsers) {
+    users.push(userId);
+  }
+
+  socket.emit("online_users_list", users);
+});
 
 
   /* JOIN CHANNEL */
@@ -45,11 +59,33 @@ io.on("connection", (socket) => {
 
   /* SEND MESSAGE */
   socket.on("send_message", (data) => {
-
     const { channelId, message } = data;
 
     io.to(channelId).emit("receive_message", message);
+
+    //  emit delivered back to sender
+    socket.emit("message_delivered", {
+      messageId: message._id,
+    });
   });
+
+  /* REACTION */
+socket.on("reaction_update", (data) => {
+  const { channelId } = data;
+  io.to(channelId).emit("reaction_updated", data);
+});
+
+
+/* PIN */
+socket.on("pin_update", (data) => {
+  io.to(data.channelId).emit("pin_updated", data);
+});
+
+/* BOOKMARK */
+socket.on("bookmark_update", (data) => {
+  io.to(data.channelId).emit("bookmark_update", data);
+});
+
 
    /* USER TYPING */
   socket.on("typing", ({ channelId, user }) => {
@@ -70,32 +106,44 @@ io.on("connection", (socket) => {
   }
 });
 
+  /* LEAVE CHANNEL */
+
+socket.on("leave_channel", (channelId) => {
+  socket.leave(channelId);
+});
+
+socket.on("message_read", ({ messageId, userId }) => {
+  io.emit("message_read_update", {
+    messageId,
+    userId,
+  });
+});
+
 
   socket.on("disconnect", () => {
-    console.log("User disconnected:", socket.id);
-        for (let [userId, socketId] of onlineUsers) {
+    for (let [userId, sockets] of onlineUsers.entries()) {
+      if (sockets.has(socket.id)) {
+        sockets.delete(socket.id);
 
-      if (socketId === socket.id) {
+        if (sockets.size === 0) {
+          onlineUsers.delete(userId);
 
-        onlineUsers.delete(userId);
-
-        io.emit("presence_update", {
-          userId,
-          status: "offline"
-        });
-
+          io.emit("presence_update", {
+            userId,
+            status: "offline",
+          });
+        }
       }
-
     }
-
   });
 
-});
+
+  });
 
 
 app.use(
   cors({
-    origin: "http://localhost:5173", // your frontend URL
+    origin: process.env.FRONTEND_URL, // your frontend URL
     credentials: true,
   })
 );
@@ -107,20 +155,16 @@ app.use("/api/channels", channelRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/bookmarks", bookmarkRoutes);
 app.use("/api", apiLimiter);
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
 
 
 connectDB();
 
 app.get("/", (req, res) => {
   res.send("Slack Clone API Running");
-});
-
-io.on("connection", (socket) => {
-  console.log("User connected:", socket.id);
-
-  socket.on("disconnect", () => {
-    console.log("User disconnected:", socket.id);
-  });
 });
 
 const PORT = process.env.PORT || 5000;

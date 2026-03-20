@@ -79,61 +79,79 @@ export const getWorkspaceById = async (req, res) => {
 };
 
 
-/* INVITE TO WORKSPACE */
-
-export const inviteToWorkspace = async (req, res) => {
+/* GENERATE DISCORD-STYLE INVITE LINK */
+export const generateInviteLink = async (req, res) => {
   try {
-    const { email } = req.body;
     const { workspaceId } = req.params;
 
-    if (!email) {
-      return res.status(400).json({ message: "Email is required" });
+    const workspace = await Workspace.findById(workspaceId);
+    if (!workspace) {
+      return res.status(404).json({ message: "Workspace not found" });
     }
 
-    const token = crypto.randomBytes(32).toString("hex");
+    // ✅ CHECK PERMISSION (ADMIN / MOD ONLY)
+    const member = workspace.members.find(
+      (m) => m.user.toString() === req.user._id.toString()
+    );
+
+    if (!member || !["admin", "moderator"].includes(member.role)) {
+      return res.status(403).json({ message: "Not authorized to invite" });
+    }
+
+    //  BETTER TOKEN (more secure)
+    const token = crypto.randomBytes(16).toString("hex");
 
     const invite = await Invitation.create({
-      email,
       workspace: workspaceId,
       invitedBy: req.user._id,
       token,
     });
 
-    const inviteLink = `${process.env.FRONTEND_URL}/invite/${token}`;
-
-    // 🔥 wrap email in try-catch
-    try {
-      await sendEmail(
-        email,
-        "Workspace Invitation",
-        `<p>You were invited to join a workspace.</p>
-         <a href="${inviteLink}">Accept Invitation</a>`
-      );
-    } catch (emailErr) {
-      console.error("Email error:", emailErr.message);
-      // still allow invite creation
-    }
-
-    res.json({ message: "Invitation sent", invite });
+    res.status(201).json({
+      message: "Invite link generated",
+      inviteLink: `${process.env.FRONTEND_URL}/join/${token}`,
+    });
 
   } catch (error) {
-    console.error("Invite error:", error); // 🔥 LOG THIS
     res.status(500).json({ message: error.message });
   }
 };
 
 
-
-/* ACCEPT WORKSPACE */
-export const acceptInvite = async (req, res) => {
+/* JOIN WORKSPACE VIA LINK */
+export const joinWorkspace = async (req, res) => {
   try {
-    const invite = await Invitation.findOne({ token: req.params.token });
+    const { token } = req.params;
 
-    if (!invite || invite.accepted) {
-      return res.status(400).json({ message: "Invalid invite" });
+    console.log("JOIN TOKEN:", token);
+
+    const invite = await Invitation.findOne({ token });
+
+    console.log("FOUND INVITE:", invite);
+
+    if (!invite) {
+      return res.status(404).json({ message: "Invalid invite link" });
+    }
+
+    console.log("EXPIRES AT:", invite.expiresAt, "NOW:", new Date());
+
+    if (invite.expiresAt < new Date()) {
+      return res.status(400).json({ message: "Invite expired" });
     }
 
     const workspace = await Workspace.findById(invite.workspace);
+
+    if (!workspace) {
+      return res.status(404).json({ message: "Workspace not found" });
+    }
+
+    const isMember = workspace.members.some(
+      (m) => m.user.toString() === req.user._id.toString()
+    );
+
+    if (isMember) {
+      return res.status(400).json({ message: "Already a member" });
+    }
 
     workspace.members.push({
       user: req.user._id,
@@ -142,14 +160,20 @@ export const acceptInvite = async (req, res) => {
 
     await workspace.save();
 
-    invite.accepted = true;
-    await invite.save();
+    // 🔥 TEMP: COMMENT THIS
+    // await Invitation.deleteOne({ _id: invite._id });
 
-    res.json({ message: "Joined workspace" });
+    res.json({
+      message: "Joined successfully",
+      workspaceId: workspace._id,
+    });
+
   } catch (err) {
+    console.error("JOIN ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
+
 
 
 /* REMOVE MEMBER */

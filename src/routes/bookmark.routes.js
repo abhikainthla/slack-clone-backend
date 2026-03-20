@@ -1,17 +1,16 @@
 import express from "express";
 import protect from "../middleware/auth.middleware.js";
 import {
-  bookmarkMessage,
-  getBookmarks,
-  removeBookmark
+  toggleBookmark,
+  getBookmarks
 } from "../controllers/bookmark.controller.js";
 
 const router = express.Router();
 
-router.post("/:messageId", protect, bookmarkMessage);
+/* TOGGLE BOOKMARK (ADD / REMOVE) */
+router.post("/:messageId", protect, toggleBookmark);
 
+/* GET ALL BOOKMARKS */
 router.get("/", protect, getBookmarks);
-
-router.delete("/:messageId", protect, removeBookmark);
 
 export default router;
