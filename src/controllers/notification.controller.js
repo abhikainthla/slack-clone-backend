@@ -8,3 +8,17 @@ export const getNotifications = async (req, res) => {
 
   res.json(notifications);
 };
+
+export const markWorkspaceNotificationsRead = async (req, res) => {
+  const { workspaceId } = req.params;
+
+  await Notification.updateMany(
+    {
+      user: req.user._id,
+      read: false,
+    },
+    { read: true }
+  );
+
+  res.json({ success: true });
+};

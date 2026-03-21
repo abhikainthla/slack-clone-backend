@@ -12,6 +12,8 @@ import messageRoutes from "./routes/message.routes.js";
 import onlineUsers from "./sockets/presence.js";
 import bookmarkRoutes from "./routes/bookmark.routes.js";
 import { apiLimiter } from "./middleware/rateLimit.middleware.js";
+import notificationRoutes from "./routes/notification.routes.js";
+import dmRoutes from "./routes/dm.routes.js";
 
 dotenv.config();
 
@@ -65,6 +67,15 @@ io.on("connection", (socket) => {
       messageId: message._id,
     });
   });
+
+ socket.on("join_dm", (userId) => {
+  socket.join(userId);
+});
+
+
+socket.on("send_dm", ({ toUserId, message }) => {
+  io.to(toUserId).emit("receive_dm", message);
+});
 
   /* ================= REACTIONS ================= */
   socket.on("reaction_update", (data) => {
@@ -136,6 +147,8 @@ app.use("/api/workspaces", workspaceRoutes);
 app.use("/api/channels", channelRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/bookmarks", bookmarkRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/dms", dmRoutes);
 app.use("/api", apiLimiter);
 
 

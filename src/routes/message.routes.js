@@ -3,7 +3,6 @@ import protect from "../middleware/auth.middleware.js";
 
 import {
   sendMessage,
-  getChannelMessages,
   addReaction,
   editMessage,
   replyToMessage,
@@ -15,6 +14,7 @@ import {
   getPinnedMessages,
   getEditHistory,
   markMessageRead,
+  getMessages,
 } from "../controllers/message.controller.js";
 import upload from "../middleware/upload.js";
 
@@ -27,8 +27,9 @@ router.post("/", protect, sendMessage);
 router.get("/search", protect, searchMessages);
 
 
-/* GET CHANNEL MESSAGES */
-router.get("/:channelId", protect, getChannelMessages);
+/* GET MESSAGES */
+router.get("/", protect, getMessages);
+
 
 /* ADD REACTIONS */
 router.post("/reaction/:messageId", protect, addReaction);

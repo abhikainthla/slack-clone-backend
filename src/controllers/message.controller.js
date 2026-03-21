@@ -4,76 +4,102 @@ import Notification from "../models/Notification.js";
 import User from "../models/User.js";
 import cloudinary from "../utils/cloudinary.js";
 import fs from "fs";
-
+import Conversation from "../models/Conversation.js";
 /* SEND MESSAGE */
 export const sendMessage = async (req, res) => {
   try {
+    const { channelId, receiverId, content } = req.body;
 
-    const { channelId, content } = req.body;
+    let conversationId = null;
 
-    const message = await Message.create({
-      channel: channelId,
-      sender: req.user._id,
-      content,
-    });
+    /* ================= DM LOGIC ================= */
+    if (receiverId) {
+      let conversation = await Conversation.findOne({
+        members: { $all: [req.user._id, receiverId] },
+      });
 
-    /* MENTION DETECTION */
-    const mentions = content.match(/@(\w+)/g);
-
-    if (mentions) {
-
-      for (let mention of mentions) {
-
-        const username = mention.replace("@", "");
-
-        const user = await User.findOne({ username });
-
-        if (user) {
-
-          await Notification.create({
-            user: user._id,
-            message: message._id,
-            type: "mention",
-          });
-
-        }
+      if (!conversation) {
+        conversation = await Conversation.create({
+          members: [req.user._id, receiverId],
+        });
       }
+
+      conversationId = conversation._id;
     }
 
-    res.status(201).json(message);
+    /* ================= CREATE MESSAGE ================= */
+    const message = await Message.create({
+      sender: req.user._id,
+      content,
+      channel: channelId || null,
+      conversation: conversationId,
+    });
 
+    const populatedMessage = await Message.findById(message._id)
+      .populate("sender", "name avatar")
+      .populate("channel", "_id")
+      .populate("conversation");
+
+    /* ================= SOCKET ================= */
+    if (channelId) {
+      req.io.to(channelId).emit("receive_message", populatedMessage);
+    } else {
+      req.io.to(receiverId.toString()).emit("receive_dm", populatedMessage);
+      req.io.to(req.user._id.toString()).emit("receive_dm", populatedMessage);
+    }
+
+    res.status(201).json(populatedMessage);
   } catch (error) {
+    console.error("❌ SEND MESSAGE ERROR:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
 
 /* GET MESSAGES BY CHANNEL */
-export const getChannelMessages = async (req, res) => {
+export const getMessages = async (req, res) => {
   try {
+    const { channelId, userId } = req.query;
 
-    const { channelId } = req.params;
+    let query = {};
 
-    const page = parseInt(req.query.page) || 1;
-    const limit = 20;
+    /* ================= CHANNEL ================= */
+    if (channelId) {
+      query = {
+        channel: channelId,
+        parentMessage: null,
+      };
+    }
 
-    const skip = (page - 1) * limit;
+    /* ================= DM ================= */
+    else if (userId) {
+      const conversation = await Conversation.findOne({
+        members: { $all: [req.user._id, userId] },
+      });
 
-    const messages = await Message.find({
-      channel: channelId,
-      parentMessage: null
-    })
-      .populate("sender", "name email avatar")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+      if (!conversation) return res.json([]);
+
+      query = {
+        conversation: conversation._id,
+      };
+    } else {
+      return res.status(400).json({
+        message: "channelId or userId required",
+      });
+    }
+
+    const messages = await Message.find(query)
+      .populate("sender", "name avatar")
+      .sort({ createdAt: 1 });
 
     res.json(messages);
 
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  } catch (err) {
+    console.error("❌ GET MESSAGES ERROR:", err);
+    res.status(500).json({ message: err.message });
   }
 };
+
 
 
 /* ADD REACTION */
@@ -83,13 +109,21 @@ export const addReaction = async (req, res) => {
     const { messageId } = req.params;
     const { emoji } = req.body;
 
-
-    const message = await Message.findById(messageId).populate("channel", "_id");
+    const message = await Message.findById(messageId)
+      .populate("channel", "_id")
+      .populate("conversation"); // ✅ IMPORTANT
 
     if (!message) {
       return res.status(404).json({ message: "Message not found" });
     }
 
+    /* ✅ FIX: ensure conversation.members exists */
+    if (message.conversation && !message.conversation.members) {
+      const convo = await Conversation.findById(message.conversation._id);
+      message.conversation.members = convo.members;
+    }
+
+    /* ================= REACTION LOGIC ================= */
     const existingIndex = message.reactions.findIndex(
       (r) => r.user.toString() === req.user._id.toString()
     );
@@ -109,23 +143,34 @@ export const addReaction = async (req, res) => {
 
     await message.save();
 
-
-    req.io?.to(message.channel._id.toString()).emit("reaction_update", {
-      messageId: message._id,
-      reactions: message.reactions,
-      channelId: message.channel._id,
-    });
+    /* ================= SOCKET ================= */
+    if (message.channel) {
+      req.io.to(message.channel._id.toString()).emit("reaction_update", {
+        messageId: message._id,
+        reactions: message.reactions,
+        channelId: message.channel._id,
+      });
+    } else if (message.conversation?.members) {
+      message.conversation.members.forEach((memberId) => {
+        req.io.to(memberId.toString()).emit("reaction_update", {
+          messageId: message._id,
+          reactions: message.reactions,
+        });
+      });
+    }
 
     const populatedMessage = await Message.findById(messageId)
-      .populate("sender", "name email avatar")
-      .populate("reactions.user", "name avatar") 
+      .populate("sender", "name avatar")
+      .populate("reactions.user", "name avatar")
       .populate("channel", "_id");
 
     res.json(populatedMessage);
   } catch (error) {
+    console.error("❌ REACTION ERROR:", error);
     res.status(500).json({ message: error.message });
   }
 };
+
 
 
 
@@ -303,30 +348,48 @@ export const pinMessage = async (req, res) => {
   try {
     const { messageId } = req.params;
 
-    console.log("📌 Pin message:", messageId);
-
     const message = await Message.findByIdAndUpdate(
       messageId,
       { pinned: true },
       { new: true }
     )
       .populate("channel", "_id")
-      .populate("sender", "name email avatar");
+      .populate("sender", "name avatar")
+      .populate("conversation"); // ✅ IMPORTANT
 
-    if (!message) return res.status(404).json({ message: "Message not found" });
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
 
-    req.io?.to(message.channel._id.toString()).emit("pin_update", {
-      messageId: message._id,
-      pinned: true,
-      channelId: message.channel._id,
-    });
+    /* ✅ FIX: ensure members exist */
+    if (message.conversation && !message.conversation.members) {
+      const convo = await Conversation.findById(message.conversation._id);
+      message.conversation.members = convo.members;
+    }
+
+    /* ================= SOCKET ================= */
+    if (message.channel) {
+      req.io.to(message.channel._id.toString()).emit("pin_update", {
+        messageId: message._id,
+        pinned: true,
+        channelId: message.channel._id,
+      });
+    } else if (message.conversation?.members) {
+      message.conversation.members.forEach((id) => {
+        req.io.to(id.toString()).emit("pin_update", {
+          messageId: message._id,
+          pinned: true,
+        });
+      });
+    }
 
     res.json(message);
   } catch (error) {
-    console.error("❌ Pin Error:", error);
+    console.error("❌ PIN ERROR:", error);
     res.status(500).json({ message: error.message });
   }
 };
+
 
 
 /* UNPIN MESSAGES */
@@ -339,24 +402,43 @@ export const unpinMessage = async (req, res) => {
       { pinned: false },
       { new: true }
     )
-    .populate("channel", "_id")
-    .populate("sender", "name email avatar");
+      .populate("channel", "_id")
+      .populate("sender", "name avatar")
+      .populate("conversation"); // ✅ IMPORTANT
 
     if (!message) {
       return res.status(404).json({ message: "Message not found" });
     }
 
-    req.io.to(message.channel._id.toString()).emit("pin_update", {
-      messageId: message._id,
-      pinned: false,
-      channelId: message.channel._id
-    });
+    /* ✅ FIX: ensure members exist */
+    if (message.conversation && !message.conversation.members) {
+      const convo = await Conversation.findById(message.conversation._id);
+      message.conversation.members = convo.members;
+    }
+
+    /* ================= SOCKET ================= */
+    if (message.channel) {
+      req.io.to(message.channel._id.toString()).emit("pin_update", {
+        messageId: message._id,
+        pinned: false,
+        channelId: message.channel._id,
+      });
+    } else if (message.conversation?.members) {
+      message.conversation.members.forEach((id) => {
+        req.io.to(id.toString()).emit("pin_update", {
+          messageId: message._id,
+          pinned: false, // ✅ FIXED (was true ❌)
+        });
+      });
+    }
 
     res.json(message);
   } catch (error) {
+    console.error("❌ UNPIN ERROR:", error);
     res.status(500).json({ message: error.message });
   }
 };
+
 
 
 
@@ -383,29 +465,50 @@ export const getPinnedMessages = async (req, res) => {
 
 /* MARK MESSAGE READ */
 export const markMessageRead = async (req, res) => {
-  const { messageId } = req.params;
+  try {
+    const { messageId } = req.params;
 
-  const message = await Message.findByIdAndUpdate(
-    messageId,
-    {
-      $addToSet: {
-        readBy: {
-          user: req.user._id,
-          readAt: new Date(),
+    const message = await Message.findByIdAndUpdate(
+      messageId,
+      {
+        $addToSet: {
+          readBy: {
+            user: req.user._id,
+            readAt: new Date(),
+          },
         },
       },
-    },
-    { new: true }
-  );
+      { new: true }
+    )
+      .populate("channel", "_id")
+      .populate("conversation");
 
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
 
-  //  emit socket event
-    req.io.to(message.channel.toString()).emit("message_read_update", {
-      messageId,
-      userId: req.user._id,
-    });
+    // ✅ FIX: handle BOTH channel + DM
+    if (message.channel) {
+      req.io.to(message.channel._id.toString()).emit("message_read_update", {
+        messageId,
+        userId: req.user._id,
+      });
+    } else if (message.conversation) {
+      message.conversation.members.forEach((memberId) => {
+        req.io.to(memberId.toString()).emit("message_read_update", {
+          messageId,
+          userId: req.user._id,
+        });
+      });
+    }
 
-
-  res.json(message);
+    res.json(message);
+  } catch (error) {
+    console.error("❌ READ ERROR:", error);
+    res.status(500).json({ message: error.message });
+  }
 };
+
+
+
 
