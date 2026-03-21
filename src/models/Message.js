@@ -72,11 +72,12 @@ const messageSchema = new mongoose.Schema(
       },
     ],
     bookmarkedBy: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      },
-    ],
+  {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: [], 
+  },
+],
 
   },
   { timestamps: true }

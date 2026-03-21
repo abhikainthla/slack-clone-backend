@@ -83,7 +83,8 @@ export const addReaction = async (req, res) => {
     const { messageId } = req.params;
     const { emoji } = req.body;
 
-     const message = await Message.findById(messageId).populate("channel", "_id");
+
+    const message = await Message.findById(messageId).populate("channel", "_id");
 
     if (!message) {
       return res.status(404).json({ message: "Message not found" });
@@ -108,15 +109,16 @@ export const addReaction = async (req, res) => {
 
     await message.save();
 
-     req.io.to(message.channel._id.toString()).emit("reaction_update", {
+
+    req.io?.to(message.channel._id.toString()).emit("reaction_update", {
       messageId: message._id,
       reactions: message.reactions,
-      channelId: message.channel._id
+      channelId: message.channel._id,
     });
 
-    // ✅ Populate sender for UI
     const populatedMessage = await Message.findById(messageId)
       .populate("sender", "name email avatar")
+      .populate("reactions.user", "name avatar") 
       .populate("channel", "_id");
 
     res.json(populatedMessage);
@@ -124,6 +126,7 @@ export const addReaction = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 
 
@@ -299,32 +302,32 @@ export const searchMessages = async (req, res) => {
 export const pinMessage = async (req, res) => {
   try {
     const { messageId } = req.params;
-    
-    // ✅ Populate channel and sender
+
+    console.log("📌 Pin message:", messageId);
+
     const message = await Message.findByIdAndUpdate(
       messageId,
       { pinned: true },
       { new: true }
     )
-    .populate("channel", "_id")
-    .populate("sender", "name email avatar");
+      .populate("channel", "_id")
+      .populate("sender", "name email avatar");
 
-    if (!message) {
-      return res.status(404).json({ message: "Message not found" });
-    }
+    if (!message) return res.status(404).json({ message: "Message not found" });
 
-    // ✅ Emit correct socket event
-    req.io.to(message.channel._id.toString()).emit("pin_update", {
+    req.io?.to(message.channel._id.toString()).emit("pin_update", {
       messageId: message._id,
       pinned: true,
-      channelId: message.channel._id
+      channelId: message.channel._id,
     });
 
     res.json(message);
   } catch (error) {
+    console.error("❌ Pin Error:", error);
     res.status(500).json({ message: error.message });
   }
 };
+
 
 /* UNPIN MESSAGES */
 export const unpinMessage = async (req, res) => {

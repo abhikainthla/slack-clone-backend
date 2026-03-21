@@ -24,102 +24,81 @@ const io = new Server(server, {
   },
 });
 
+app.set("socketio", io);
+
 io.on("connection", (socket) => {
-  socket.on("user_online", (userId) => {
-      if (!onlineUsers.has(userId)) {
-        onlineUsers.set(userId, new Set());
-      }
-
-      onlineUsers.get(userId).add(socket.id);
-
-      io.emit("presence_update", {
-        userId,
-        status: "online",
-      });
-    });
-
-
   console.log("User connected:", socket.id);
 
+  /* ================= ONLINE ================= */
+  socket.on("user_online", (userId) => {
+    if (!onlineUsers.has(userId)) {
+      onlineUsers.set(userId, new Set());
+    }
+
+    onlineUsers.get(userId).add(socket.id);
+
+    io.emit("presence_update", {
+      userId,
+      status: "online",
+    });
+  });
+
   socket.on("get_online_users", () => {
-  const users = [];
+    const users = Array.from(onlineUsers.keys());
+    socket.emit("online_users_list", users);
+  });
 
-  for (let [userId] of onlineUsers) {
-    users.push(userId);
-  }
-
-  socket.emit("online_users_list", users);
-});
-
-
-  /* JOIN CHANNEL */
+  /* ================= CHANNEL ================= */
   socket.on("join_channel", (channelId) => {
     socket.join(channelId);
   });
 
-  /* SEND MESSAGE */
-  socket.on("send_message", (data) => {
-    const { channelId, message } = data;
+  socket.on("leave_channel", (channelId) => {
+    socket.leave(channelId);
+  });
 
+  /* ================= MESSAGE ================= */
+  socket.on("send_message", ({ channelId, message }) => {
     io.to(channelId).emit("receive_message", message);
 
-    //  emit delivered back to sender
     socket.emit("message_delivered", {
       messageId: message._id,
     });
   });
 
-  /* REACTION */
-socket.on("reaction_update", (data) => {
-  const { channelId } = data;
-  io.to(channelId).emit("reaction_updated", data);
-});
+  /* ================= REACTIONS ================= */
+  socket.on("reaction_update", (data) => {
+    io.to(data.channelId).emit("reaction_update", data);
+  });
 
+  /* ================= PIN ================= */
+  socket.on("pin_update", (data) => {
+    io.to(data.channelId).emit("pin_update", data);
+  });
 
-/* PIN */
-socket.on("pin_update", (data) => {
-  io.to(data.channelId).emit("pin_updated", data);
-});
+  /* ================= BOOKMARK ================= */
+  socket.on("bookmark_update", (data) => {
+    io.to(data.channelId).emit("bookmark_update", data);
+  });
 
-/* BOOKMARK */
-socket.on("bookmark_update", (data) => {
-  io.to(data.channelId).emit("bookmark_update", data);
-});
-
-
-   /* USER TYPING */
+  /* ================= TYPING ================= */
   socket.on("typing", ({ channelId, user }) => {
     socket.to(channelId).emit("user_typing", user);
   });
 
-  /* STOP TYPING */
   socket.on("stop_typing", ({ channelId, user }) => {
     socket.to(channelId).emit("user_stop_typing", user);
   });
 
-  /* NOTIFICATION */
-  socket.on("new_notification", (userId, notification) => {
-  const socketId = onlineUsers.get(userId);
-
-  if (socketId) {
-    io.to(socketId).emit("receive_notification", notification);
-  }
-});
-
-  /* LEAVE CHANNEL */
-
-socket.on("leave_channel", (channelId) => {
-  socket.leave(channelId);
-});
-
-socket.on("message_read", ({ messageId, userId }) => {
-  io.emit("message_read_update", {
-    messageId,
-    userId,
+  /* ================= READ RECEIPTS ================= */
+  socket.on("message_read", ({ messageId, userId }) => {
+    io.emit("message_read_update", {
+      messageId,
+      userId,
+    });
   });
-});
 
-
+  /* ================= DISCONNECT ================= */
   socket.on("disconnect", () => {
     for (let [userId, sockets] of onlineUsers.entries()) {
       if (sockets.has(socket.id)) {
@@ -136,9 +115,8 @@ socket.on("message_read", ({ messageId, userId }) => {
       }
     }
   });
+});
 
-
-  });
 
 
 app.use(
@@ -148,6 +126,10 @@ app.use(
   })
 );
 app.use(express.json());
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/workspaces", workspaceRoutes);
@@ -155,10 +137,7 @@ app.use("/api/channels", channelRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/bookmarks", bookmarkRoutes);
 app.use("/api", apiLimiter);
-app.use((req, res, next) => {
-  req.io = io;
-  next();
-});
+
 
 
 connectDB();

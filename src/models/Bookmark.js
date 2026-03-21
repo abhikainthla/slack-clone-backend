@@ -1,17 +1,25 @@
 import mongoose from "mongoose";
 
-const bookmarkSchema = new mongoose.Schema({
+const bookmarkSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
 
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User"
+    message: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      required: true,
+    },
+
+    section: {
+      type: String,
+      default: "all", // design | code | links etc
+    },
   },
-
-  message: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Message"
-  }
-
-}, { timestamps: true });
+  { timestamps: true }
+);
 
 export default mongoose.model("Bookmark", bookmarkSchema);
