@@ -21,19 +21,30 @@ const isMember = (channel, userId) => {
   );
 };
 
+const hasWorkspacePermission = (workspace, userId) => {
+  const member = workspace.members.find(
+    (m) => m.user.toString() === userId.toString()
+  );
+
+  return member && ["admin", "moderator"].includes(member.role);
+};
+
 /* ---------------- CREATE CHANNEL ---------------- */
 
 export const createChannel = async (req, res) => {
   try {
     const { name, workspaceId, isPrivate } = req.body;
 
+    /*  VALIDATION */
     if (!name || !workspaceId) {
       return res.status(400).json({
         message: "Channel name and workspaceId required",
       });
     }
 
+    /*  FETCH WORKSPACE */
     const workspace = await Workspace.findById(workspaceId);
+
     if (!workspace) {
       return res.status(404).json({
         message: "Workspace not found",
@@ -42,21 +53,55 @@ export const createChannel = async (req, res) => {
 
     const userId = req.user._id;
 
+    /*  CHECK USER ROLE IN WORKSPACE */
+    const member = workspace.members.find(
+      (m) => m.user.toString() === userId.toString()
+    );
+
+    if (!member) {
+      return res.status(403).json({
+        message: "You are not a member of this workspace",
+      });
+    }
+
+    /*  ONLY ADMIN / MODERATOR CAN CREATE */
+    if (!["admin", "moderator"].includes(member.role)) {
+      return res.status(403).json({
+        message: "Only admins or moderators can create channels",
+      });
+    }
+
+
+    const existingChannel = await Channel.findOne({
+      name: name.trim(),
+      workspace: workspaceId,
+    });
+
+    if (existingChannel) {
+      return res.status(400).json({
+        message: "Channel with this name already exists",
+      });
+    }
+
+    /*  CREATE CHANNEL */
     const channel = await Channel.create({
-      name,
+      name: name.trim(),
       workspace: workspaceId,
       createdBy: userId,
       members: [userId],
       isPrivate: isPrivate || false,
       roles: {
-        admins: [userId],
+        admins: [userId], // creator becomes admin
         moderators: [],
       },
     });
 
     res.status(201).json(channel);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("Create Channel Error:", error);
+    res.status(500).json({
+      message: "Failed to create channel",
+    });
   }
 };
 
@@ -174,9 +219,17 @@ export const updateChannel = async (req, res) => {
     const userId = req.user._id;
 
     const channel = await Channel.findById(channelId);
-
     if (!channel) {
       return res.status(404).json({ message: "Channel not found" });
+    }
+
+    /* ✅ FETCH WORKSPACE */
+    const workspace = await Workspace.findById(channel.workspace);
+
+    if (!hasWorkspacePermission(workspace, userId)) {
+      return res.status(403).json({
+        message: "Only workspace admins/moderators can update channels",
+      });
     }
 
     if (!isAdmin(channel, userId)) {
@@ -190,9 +243,11 @@ export const updateChannel = async (req, res) => {
 
     res.json(channel);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Update failed" });
   }
 };
+
 
 /* ---------------- DELETE CHANNEL ---------------- */
 
@@ -207,6 +262,15 @@ export const deleteChannel = async (req, res) => {
       return res.status(404).json({ message: "Channel not found" });
     }
 
+    /* ✅ FETCH WORKSPACE */
+    const workspace = await Workspace.findById(channel.workspace);
+
+    if (!hasWorkspacePermission(workspace, userId)) {
+      return res.status(403).json({
+        message: "Only workspace admins/moderators can delete channels",
+      });
+    }
+
     if (!isAdmin(channel, userId)) {
       return res.status(403).json({ message: "Admins only" });
     }
@@ -215,9 +279,11 @@ export const deleteChannel = async (req, res) => {
 
     res.json({ message: "Channel deleted" });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Delete failed" });
   }
 };
+
 
 /* ---------------- INVITE USER ---------------- */
 

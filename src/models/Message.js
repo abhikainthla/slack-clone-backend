@@ -12,6 +12,12 @@ const messageSchema = new mongoose.Schema(
       type: String,
     },
 
+        files: [
+      {
+        type: String,
+      },
+    ],
+
     //  For channel messages
     channel: {
   type: mongoose.Schema.Types.ObjectId,
@@ -24,6 +30,12 @@ conversation: {
   ref: "Conversation",
   default: null,
 },
+mentions: [
+  {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+  },
+],
 
     parentMessage: {
       type: mongoose.Schema.Types.ObjectId,

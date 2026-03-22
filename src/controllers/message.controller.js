@@ -8,11 +8,22 @@ import Conversation from "../models/Conversation.js";
 /* SEND MESSAGE */
 export const sendMessage = async (req, res) => {
   try {
-    const { channelId, receiverId, content } = req.body;
+    const { channelId, receiverId, content, files, mentions } = req.body;
 
     let conversationId = null;
 
-    /* ================= DM LOGIC ================= */
+    /* ================= MENTIONS ================= */
+    let mentionedUsers = [];
+
+    if (mentions?.length) {
+      const users = await User.find({
+        name: { $in: mentions },
+      });
+
+      mentionedUsers = users.map((u) => u._id);
+    }
+
+    /* ================= DM ================= */
     if (receiverId) {
       let conversation = await Conversation.findOne({
         members: { $all: [req.user._id, receiverId] },
@@ -31,14 +42,25 @@ export const sendMessage = async (req, res) => {
     const message = await Message.create({
       sender: req.user._id,
       content,
+      files: files || [],
+      mentions: mentionedUsers,
       channel: channelId || null,
       conversation: conversationId,
     });
 
+    /* ================= POPULATE ================= */
     const populatedMessage = await Message.findById(message._id)
       .populate("sender", "name avatar")
-      .populate("channel", "_id")
-      .populate("conversation");
+      .lean();
+
+    /* ================= EMIT MENTIONS (FIXED) ================= */
+    if (mentionedUsers.length > 0) {
+      mentionedUsers.forEach((id) => {
+        req.io.to(id.toString()).emit("mentioned", {
+          message: populatedMessage,
+        });
+      });
+    }
 
     /* ================= SOCKET ================= */
     if (channelId) {
@@ -49,11 +71,14 @@ export const sendMessage = async (req, res) => {
     }
 
     res.status(201).json(populatedMessage);
+
   } catch (error) {
     console.error("❌ SEND MESSAGE ERROR:", error);
     res.status(500).json({ message: error.message });
   }
 };
+
+
 
 
 /* GET MESSAGES BY CHANNEL */

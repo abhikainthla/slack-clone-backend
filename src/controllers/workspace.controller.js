@@ -60,23 +60,25 @@ export const getUserWorkspaces = async (req, res) => {
 /* GET SINGLE WORKSPACE */
 export const getWorkspaceById = async (req, res) => {
   try {
-
     const workspace = await Workspace.findById(req.params.id)
       .populate("owner", "name email")
       .populate("members.user", "name email");
 
-    if (!workspace) {
-      return res.status(404).json({
-        message: "Workspace not found",
-      });
-    }
+    if (!workspace) return res.status(404).json({ message: "Not found" });
 
-    res.json(workspace);
+    const member = workspace.members.find(
+      (m) => m.user._id.toString() === req.user._id.toString()
+    );
 
+    res.json({
+      ...workspace.toObject(),
+      role: member?.role || "member", 
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 
 /* GENERATE DISCORD-STYLE INVITE LINK */
@@ -261,3 +263,98 @@ export const filterChannels = async (req, res) => {
 
   res.json(channels);
 };
+
+
+/* ---------------- UPDATE MEMBER ROLE ---------------- */
+export const updateMemberRole = async (req, res) => {
+  try {
+    const { id: workspaceId, userId } = req.params;
+    const { role } = req.body; // "admin" | "moderator" | "member"
+
+    const workspace = await Workspace.findById(workspaceId);
+
+    if (!workspace) {
+      return res.status(404).json({ message: "Workspace not found" });
+    }
+
+    /*  CHECK CURRENT USER ROLE */
+    const currentUser = workspace.members.find(
+      (m) => m.user.toString() === req.user._id.toString()
+    );
+
+    if (!currentUser || currentUser.role !== "admin") {
+      return res.status(403).json({
+        message: "Only admins can change roles",
+      });
+    }
+
+    /*  PREVENT SELF DEMOTION */
+    if (req.user._id.toString() === userId) {
+      return res.status(400).json({
+        message: "You cannot change your own role",
+      });
+    }
+
+    const member = workspace.members.find(
+      (m) => m.user.toString() === userId
+    );
+
+    if (!member) {
+      return res.status(404).json({
+        message: "Member not found",
+      });
+    }
+
+    member.role = role;
+
+    await workspace.save();
+
+    res.json({
+      message: "Role updated",
+      members: workspace.members,
+    });
+  } catch (err) {
+    console.error("Role update error:", err);
+    res.status(500).json({ message: "Failed to update role" });
+  }};
+
+
+  export const promoteMember = async (req, res) => {
+    try {
+      const { id, userId } = req.params;
+      const workspace = await Workspace.findById(id);
+
+      const memberIndex = workspace.members.findIndex(m => m.user.toString() === userId);
+      
+      if (memberIndex === -1) return res.status(404).json({ message: "Member not found" });
+
+      workspace.members[memberIndex].role = "moderator";
+      await workspace.save();
+
+      res.json({ message: "User promoted" });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  };
+
+export const demoteMember = async (req, res) => {
+  try {
+    const { id, userId } = req.params;
+    const workspace = await Workspace.findById(id);
+
+    const memberIndex = workspace.members.findIndex(m => m.user.toString() === userId);
+    
+    if (memberIndex === -1) return res.status(404).json({ message: "Member not found" });
+
+    workspace.members[memberIndex].role = "member";
+    await workspace.save();
+
+    res.json({ message: "User demoted" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+
+

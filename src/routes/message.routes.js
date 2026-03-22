@@ -41,7 +41,7 @@ router.put("/:messageId", protect, editMessage);
 router.post("/reply/:messageId", protect, replyToMessage);
 
 /* UPLOAD FILES */
-router.post("/upload", protect, upload.single("file"), uploadFile);
+router.post("/upload", upload.single("file"), uploadFile);
 
 /* MARK CHANNEL AS READ */
 router.post("/read/:channelId", protect, markChannelRead);

@@ -13,7 +13,6 @@ import onlineUsers from "./sockets/presence.js";
 import bookmarkRoutes from "./routes/bookmark.routes.js";
 import { apiLimiter } from "./middleware/rateLimit.middleware.js";
 import notificationRoutes from "./routes/notification.routes.js";
-import dmRoutes from "./routes/dm.routes.js";
 
 dotenv.config();
 
@@ -148,7 +147,6 @@ app.use("/api/channels", channelRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/bookmarks", bookmarkRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/dms", dmRoutes);
 app.use("/api", apiLimiter);
 
 
