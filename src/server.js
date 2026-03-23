@@ -58,6 +58,10 @@ io.on("connection", (socket) => {
     socket.leave(channelId);
   });
 
+    socket.on("join_user", (userId) => {
+    socket.join(userId);
+  });
+
   /* ================= MESSAGE ================= */
   socket.on("send_message", ({ channelId, message }) => {
     io.to(channelId).emit("receive_message", message);

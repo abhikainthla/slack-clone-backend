@@ -1,5 +1,7 @@
 import Channel from "../models/Channel.js";
 import Workspace from "../models/Workspace.js";
+import { enrichChannel } from "../utils/enrichChannel.js";
+
 
 /* ---------------- ROLE HELPERS (SAFE) ---------------- */
 
@@ -115,31 +117,23 @@ export const getWorkspaceChannels = async (req, res) => {
     const channels = await Channel.find({
       workspace: workspaceId,
     })
+      .populate({
+        path: "lastMessage",
+        populate: {
+          path: "readBy.user",
+          select: "_id",
+        },
+      })
+
       .populate("createdBy", "name email")
       .populate("members", "name email")
       .lean();
 
-    const updatedChannels = channels.map((channel) => {
-      const admins = channel.roles?.admins || [];
-      const moderators = channel.roles?.moderators || [];
 
-      let role = "member";
+const updatedChannels = channels.map((channel) =>
+  enrichChannel(channel, userId)
+);
 
-      if (admins.some((id) => id.toString() === userId)) {
-        role = "admin";
-      } else if (moderators.some((id) => id.toString() === userId)) {
-        role = "moderator";
-      }
-
-      return {
-        ...channel,
-        roles: {
-          admins,
-          moderators,
-        },
-        role,
-      };
-    });
 
     res.json(updatedChannels);
   } catch (error) {

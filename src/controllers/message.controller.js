@@ -3,6 +3,7 @@ import ChannelMember from "../models/ChannelMember.js";
 import Notification from "../models/Notification.js";
 import User from "../models/User.js";
 import cloudinary from "../utils/cloudinary.js";
+import Channel from "../models/Channel.js";
 import fs from "fs";
 import Conversation from "../models/Conversation.js";
 /* SEND MESSAGE */
@@ -12,16 +13,23 @@ export const sendMessage = async (req, res) => {
 
     let conversationId = null;
 
+    if (!channelId && !receiverId) {
+    return res.status(400).json({
+      message: "channelId or receiverId required",
+    });
+  }
     /* ================= MENTIONS ================= */
     let mentionedUsers = [];
 
-    if (mentions?.length) {
+    if (Array.isArray(mentions) && mentions.length > 0) {
       const users = await User.find({
         name: { $in: mentions },
       });
 
       mentionedUsers = users.map((u) => u._id);
     }
+
+
 
     /* ================= DM ================= */
     if (receiverId) {
@@ -47,6 +55,13 @@ export const sendMessage = async (req, res) => {
       channel: channelId || null,
       conversation: conversationId,
     });
+
+    if (channelId) {
+  await Channel.findByIdAndUpdate(channelId, {
+    lastMessage: message._id,
+  });
+}
+
 
     /* ================= POPULATE ================= */
     const populatedMessage = await Message.findById(message._id)
@@ -142,7 +157,6 @@ export const addReaction = async (req, res) => {
       return res.status(404).json({ message: "Message not found" });
     }
 
-    /* ✅ FIX: ensure conversation.members exists */
     if (message.conversation && !message.conversation.members) {
       const convo = await Conversation.findById(message.conversation._id);
       message.conversation.members = convo.members;
@@ -261,23 +275,69 @@ export const getEditHistory = async (req, res) => {
 
 export const replyToMessage = async (req, res) => {
   try {
-
     const { messageId } = req.params;
-    const { content } = req.body;
+    const { content, channelId, receiverId } = req.body;
+
+    let conversationId = null;
+
+    if (receiverId) {
+      let convo = await Conversation.findOne({
+        members: { $all: [req.user._id, receiverId] },
+      });
+
+      if (!convo) {
+        convo = await Conversation.create({
+          members: [req.user._id, receiverId],
+        });
+      }
+
+      conversationId = convo._id;
+    }
 
     const reply = await Message.create({
-      channel: req.body.channelId,
       sender: req.user._id,
       content,
-      parentMessage: messageId
+      parentMessage: messageId,
+      channel: channelId || null,
+      conversation: conversationId,
     });
 
-    res.status(201).json(reply);
+    const populated = await Message.findById(reply._id)
+      .populate("sender", "name avatar");
 
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    //  SOCKET EMIT
+    // prevent emitting twice
+    if (channelId) {
+      req.io.to(channelId).emit("receive_reply", populated);
+    } else if (conversationId) {
+      const convo = await Conversation.findById(conversationId);
+      convo.members.forEach((id) => {
+        if (id.toString() !== req.user._id.toString()) {
+          req.io.to(id.toString()).emit("receive_reply", populated);
+        }
+      });
+    }
+
+
+    res.json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
+
+export const getReplies = async (req, res) => {
+  const { messageId } = req.params;
+
+  const replies = await Message.find({
+    parentMessage: messageId,
+  })
+    .populate("sender", "name avatar")
+    .sort({ createdAt: 1 });
+
+  res.json(replies);
+};
+
+
 
 /* UPLOAD FILES */
 
@@ -294,7 +354,7 @@ export const uploadFile = async (req, res) => {
       folder: "slack-clone",
     });
 
-    console.log("✅ UPLOADED:", result.secure_url);
+    console.log(" UPLOADED:", result.secure_url);
 
     if (fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);

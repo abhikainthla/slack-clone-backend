@@ -41,6 +41,11 @@ const channelSchema = new mongoose.Schema(
       },
     ],
 
+    lastMessage: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "Message",
+},
+
     isPrivate: {
       type: Boolean,
       default: false,

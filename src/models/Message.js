@@ -58,6 +58,17 @@ mentions: [
         ref: "User",
       },
     ],
+
+    readBy: [
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    readAt: Date,
+  },
+],
+
   },
   { timestamps: true }
 );

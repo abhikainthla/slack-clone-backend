@@ -15,6 +15,7 @@ import {
   getEditHistory,
   markMessageRead,
   getMessages,
+  getReplies,
 } from "../controllers/message.controller.js";
 import upload from "../middleware/upload.js";
 
@@ -39,6 +40,9 @@ router.put("/:messageId", protect, editMessage);
 
 /* REPLY TO MESSAGE */
 router.post("/reply/:messageId", protect, replyToMessage);
+
+/* GET REPLIES */
+router.get("/replies/:messageId", protect, getReplies);
 
 /* UPLOAD FILES */
 router.post("/upload", upload.single("file"), uploadFile);
