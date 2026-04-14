@@ -25,11 +25,15 @@ export const register = async (req, res) => {
     });
 
     res.status(201).json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      token: generateToken(user._id),
-    });
+  user: {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    isOnboarded: false, 
+  },
+  token: generateToken(user._id),
+});
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -57,11 +61,16 @@ export const login = async (req, res) => {
     }
 
     res.json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      token: generateToken(user._id),
-    });
+  user: {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    avatar: user.avatar,
+    isOnboarded: user.isOnboarded || false,
+  },
+  token: generateToken(user._id),
+});
+
 
   } catch (error) {
     res.status(500).json({ message: error.message });

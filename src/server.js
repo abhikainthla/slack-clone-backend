@@ -49,6 +49,11 @@ io.on("connection", (socket) => {
     socket.emit("online_users_list", users);
   });
 
+  socket.on("update_status", ({ userId, status }) => {
+  io.emit("presence_update", { userId, status });
+});
+
+
   /* ================= CHANNEL ================= */
   socket.on("join_channel", (channelId) => {
     socket.join(channelId);
@@ -76,9 +81,6 @@ io.on("connection", (socket) => {
 });
 
 
-socket.on("send_dm", ({ toUserId, message }) => {
-  io.to(toUserId).emit("receive_dm", message);
-});
 
   /* ================= REACTIONS ================= */
   socket.on("reaction_update", (data) => {

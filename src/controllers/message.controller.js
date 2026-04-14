@@ -65,7 +65,7 @@ export const sendMessage = async (req, res) => {
 
     /* ================= POPULATE ================= */
     const populatedMessage = await Message.findById(message._id)
-      .populate("sender", "name avatar")
+      .populate("sender", "name avatar _id")
       .lean();
 
     /* ================= EMIT MENTIONS (FIXED) ================= */
@@ -129,7 +129,7 @@ export const getMessages = async (req, res) => {
     }
 
     const messages = await Message.find(query)
-      .populate("sender", "name avatar")
+      .populate("sender", "name avatar _id")
       .sort({ createdAt: 1 });
 
     res.json(messages);
@@ -237,6 +237,25 @@ export const editMessage = async (req, res) => {
         message: "Not authorized"
       });
     }
+
+    await message.save();
+
+/* ✅ POPULATE UPDATED MESSAGE */
+const updatedMessage = await Message.findById(message._id)
+  .populate("sender", "name avatar _id");
+
+/* ✅ EMIT SOCKET */
+if (message.channel) {
+  req.io.to(message.channel.toString()).emit("message_updated", updatedMessage);
+} else if (message.conversation) {
+  const convo = await Conversation.findById(message.conversation);
+  convo.members.forEach((id) => {
+    req.io.to(id.toString()).emit("message_updated", updatedMessage);
+  });
+}
+
+res.json(updatedMessage);
+
 
     /* SAVE OLD VERSION */
     message.editHistory.push({
@@ -381,23 +400,36 @@ export const uploadFile = async (req, res) => {
 
 /* MARK AS READ */
 export const markChannelRead = async (req, res) => {
+  try {
+    const { channelId } = req.params;
+    const { messageId } = req.body;
 
-  const { channelId } = req.params;
-  const { messageId } = req.body;
+    const member = await ChannelMember.findOneAndUpdate(
+      {
+        channel: channelId,
+        user: req.user._id,
+      },
+      {
+        lastReadMessage: messageId,
+      },
+      { new: true }
+    );
 
-  const member = await ChannelMember.findOneAndUpdate(
-    {
-      channel: channelId,
-      user: req.user._id
-    },
-    {
-      lastReadMessage: messageId
-    },
-    { new: true }
-  );
 
-  res.json(member);
+// emit to channel
+req.io.to(channelId).emit("notifications_read", {
+  channelId,
+  userId: req.user._id,
+});
+
+
+    res.json(member);
+  } catch (error) {
+    console.error("❌ markChannelRead error:", error);
+    res.status(500).json({ message: error.message });
+  }
 };
+
 
 
 /* SEARCH MESSAGES */
