@@ -8,6 +8,7 @@ import {
   generateInviteLink,
   getUserWorkspaces,
   getWorkspaceById,
+  getWorkspaceMembers,
   joinWorkspace,
   markWorkspaceRead,
   promoteMember,
@@ -44,6 +45,7 @@ router.post("/:workspaceId/invite-link", protect, generateInviteLink);
 router.post("/join/:token", protect, joinWorkspace);
 router.put("/:id/mark-read", protect, markWorkspaceRead);
 router.get("/:id/filter", protect, filterChannels);
+router.get("/:id/members", protect, getWorkspaceMembers);
 
 
 

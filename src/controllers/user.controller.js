@@ -4,7 +4,7 @@ import { uploadToCloudinary } from "../utils/cloudinaryUpload.js";
 
 export const getAllUsers = async (req, res) => {
   try {
-    const users = await User.find().select("_id username name");
+    const users = await User.find().select("_id username name avatar");
     res.json(users);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch users" });

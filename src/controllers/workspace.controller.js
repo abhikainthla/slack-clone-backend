@@ -356,5 +356,34 @@ export const demoteMember = async (req, res) => {
 };
 
 
+// ---------------- GET WORKSPACE MEMBERS ----------------
+export const getWorkspaceMembers = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const workspace = await Workspace.findById(id)
+      .populate("members.user", "_id name email username avatar") 
+      .lean();
+
+    if (!workspace) {
+      return res.status(404).json({ message: "Workspace not found" });
+    }
+
+    const formatted = workspace.members.map((m) => ({
+      _id: m.user._id,
+      name: m.user.name,
+      email: m.user.email,
+      username: m.user.username, // optional
+      role: m.role,
+      avatar: m.user.avatar,      
+    }));
+
+    res.json(formatted);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
 
 

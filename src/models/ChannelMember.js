@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 
 const channelMemberSchema = new mongoose.Schema({
+  
 
   channel: {
     type: mongoose.Schema.Types.ObjectId,
