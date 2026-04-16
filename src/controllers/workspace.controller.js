@@ -48,7 +48,7 @@ export const getUserWorkspaces = async (req, res) => {
       "members.user": req.user._id,
     })
       .populate("owner", "name email")
-      .populate("members.user", "name email");
+      .populate("members.user", "_id name email username avatar status");
 
     res.json(workspaces);
 
@@ -62,7 +62,7 @@ export const getWorkspaceById = async (req, res) => {
   try {
     const workspace = await Workspace.findById(req.params.id)
       .populate("owner", "name email")
-      .populate("members.user", "name email");
+      .populate("members.user", "_id name email username avatar status");
 
     if (!workspace) return res.status(404).json({ message: "Not found" });
 

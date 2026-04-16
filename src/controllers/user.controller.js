@@ -1,6 +1,7 @@
 import User from "../models/User.js";
+import onlineUsers from "../sockets/presence.js";
 import { uploadToCloudinary } from "../utils/cloudinaryUpload.js";
-
+import mongoose from "mongoose";
 
 export const getAllUsers = async (req, res) => {
   try {
@@ -19,7 +20,9 @@ export const updateProfile = async (req, res) => {
       req.user._id,
       updates,
       { new: true }
-    ).select("-password");
+    )
+    .populate("blockedUsers", "username name avatar")
+    .select("-password");
 
     res.json(user);
   } catch (err) {
@@ -42,7 +45,7 @@ export const updateStatus = async (req, res) => {
       { new: true }
     );
 
-    // 🔥 emit realtime update
+   
     req.io.emit("presence_update", {
       userId: user._id,
       status: user.status,
@@ -58,14 +61,35 @@ export const updateStatus = async (req, res) => {
 
 export const getUserById = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id)
-      .select("-password");
+    const { id } = req.params;
 
-    res.json(user);
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid user ID" });
+    }
+
+    const user = await User.findById(id)
+      .select("-password")
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const isOnline = onlineUsers.has(id);
+
+    res.json({
+      ...user,
+      status: isOnline ? "online" : "offline",
+      lastSeen: user.lastSeen,
+    });
+
+
   } catch (err) {
-    res.status(500).json({ message: "User not found" });
+    console.error("❌ getUserById error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 };
+
 
 
 export const searchUsers = async (req, res) => {
@@ -155,3 +179,65 @@ export const completeOnboarding = async (req, res) => {
 };
 
 
+export const blockUser = async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $addToSet: { blockedUsers: userId } },
+      { new: true }
+    )
+      .populate("blockedUsers", "_id name username avatar")
+      .select("-password");
+
+    req.io.to(req.user._id.toString()).emit("user_blocked", {
+      blockedUserId: userId,
+      blockedUsers: user.blockedUsers,
+    });
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: "Block failed" });
+  }
+};
+
+
+
+export const unblockUser = async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $pull: { blockedUsers: userId } },
+      { new: true }
+    )
+      .populate("blockedUsers", "_id name username avatar")
+      .select("-password");
+
+    // ✅ EMIT REAL-TIME EVENT
+    req.io.to(req.user._id.toString()).emit("user_unblocked", {
+      unblockedUserId: userId,
+      blockedUsers: user.blockedUsers,
+    });
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: "Unblock failed" });
+  }
+};
+
+
+
+export const getProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .populate("blockedUsers", "_id name username avatar")
+      .select("-password");
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch profile" });
+  }
+};

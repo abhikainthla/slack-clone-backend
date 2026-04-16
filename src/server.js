@@ -13,6 +13,7 @@ import onlineUsers from "./sockets/presence.js";
 import bookmarkRoutes from "./routes/bookmark.routes.js";
 import { apiLimiter } from "./middleware/rateLimit.middleware.js";
 import notificationRoutes from "./routes/notification.routes.js";
+import User from "./models/User.js";
 
 dotenv.config();
 
@@ -28,29 +29,36 @@ const io = new Server(server, {
 app.set("socketio", io);
 
 io.on("connection", (socket) => {
-  console.log("User connected:", socket.id);
+  // Use a variable to track which user this socket belongs to
+  let currentUserId = null;
 
-  /* ================= ONLINE ================= */
-  socket.on("user_online", (userId) => {
+  socket.on("user_online", async (userId) => {
+    currentUserId = userId; // Store for disconnect logic
+    
     if (!onlineUsers.has(userId)) {
       onlineUsers.set(userId, new Set());
+      
+      // FIRST TIME ONLINE: Update DB and notify everyone
+      await User.findByIdAndUpdate(userId, { status: "online" });
+      
+      io.emit("presence_update", {
+        userId,
+        status: "online",
+        lastSeen: null,
+      });
     }
 
     onlineUsers.get(userId).add(socket.id);
-
-    io.emit("presence_update", {
-      userId,
-      status: "online",
-    });
-  });
-
-  socket.on("get_online_users", () => {
-    const users = Array.from(onlineUsers.keys());
-    socket.emit("online_users_list", users);
+    console.log(`User ${userId} added socket ${socket.id}. Total: ${onlineUsers.get(userId).size}`);
   });
 
   socket.on("update_status", ({ userId, status }) => {
   io.emit("presence_update", { userId, status });
+  console.log("ONLINE USERS:", users);
+});
+socket.on("get_online_users", () => {
+  const ids = Array.from(onlineUsers.keys());
+  socket.emit("online_users_list", ids);
 });
 
 
@@ -115,20 +123,28 @@ io.on("connection", (socket) => {
   });
 
   /* ================= DISCONNECT ================= */
-  socket.on("disconnect", () => {
-    for (let [userId, sockets] of onlineUsers.entries()) {
-      if (sockets.has(socket.id)) {
-        sockets.delete(socket.id);
+socket.on("disconnect", async () => {
+    if (!currentUserId || !onlineUsers.has(currentUserId)) return;
 
-        if (sockets.size === 0) {
-          onlineUsers.delete(userId);
+    const userSockets = onlineUsers.get(currentUserId);
+    userSockets.delete(socket.id);
 
-          io.emit("presence_update", {
-            userId,
-            status: "offline",
-          });
-        }
-      }
+    // ONLY IF LAST SOCKET IS GONE
+    if (userSockets.size === 0) {
+      onlineUsers.delete(currentUserId);
+      const now = new Date();
+
+      await User.findByIdAndUpdate(currentUserId, {
+        status: "offline",
+        lastSeen: now,
+      });
+
+      io.emit("presence_update", {
+        userId: currentUserId,
+        status: "offline",
+        lastSeen: now,
+      });
+      console.log(`User ${currentUserId} is now fully offline.`);
     }
   });
 });
