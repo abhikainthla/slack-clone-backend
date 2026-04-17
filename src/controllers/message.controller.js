@@ -6,6 +6,7 @@ import cloudinary from "../utils/cloudinary.js";
 import Channel from "../models/Channel.js";
 import fs from "fs";
 import Conversation from "../models/Conversation.js";
+import mongoose from "mongoose";
 /* SEND MESSAGE */
 export const sendMessage = async (req, res) => {
   try {
@@ -23,11 +24,13 @@ export const sendMessage = async (req, res) => {
 
     if (Array.isArray(mentions) && mentions.length > 0) {
       const users = await User.find({
-        name: { $in: mentions },
+        _id: { $in: mentions },
       });
 
       mentionedUsers = users.map((u) => u._id);
     }
+
+
 
 
 
@@ -47,14 +50,21 @@ export const sendMessage = async (req, res) => {
     }
 
     /* ================= CREATE MESSAGE ================= */
+    if (!content && (!files || files.length === 0)) {
+      return res.status(400).json({ message: "Message cannot be empty" });
+    }
     const message = await Message.create({
       sender: req.user._id,
       content,
       files: files || [],
-      mentions: mentionedUsers,
+      mentions: mentionedUsers || [],
       channel: channelId || null,
       conversation: conversationId,
+      clientId: req.body.clientId,  
     });
+
+
+
 
     if (channelId) {
   await Channel.findByIdAndUpdate(channelId, {
@@ -68,6 +78,9 @@ export const sendMessage = async (req, res) => {
       .populate("sender", "name avatar _id")
       .lean();
 
+
+
+
     /* ================= EMIT MENTIONS (FIXED) ================= */
     if (mentionedUsers.length > 0) {
       mentionedUsers.forEach((id) => {
@@ -79,13 +92,15 @@ export const sendMessage = async (req, res) => {
 
     /* ================= SOCKET ================= */
     if (channelId) {
-      req.io.to(channelId).emit("receive_message", populatedMessage);
-    } else {
+      req.io.to(channelId).except(req.user._id.toString()).emit("receive_message", populatedMessage);
+    } else if (receiverId) {
       req.io.to(receiverId.toString()).emit("receive_dm", populatedMessage);
       req.io.to(req.user._id.toString()).emit("receive_dm", populatedMessage);
     }
 
-    res.status(201).json(populatedMessage);
+
+return res.status(201).json(populatedMessage);
+
 
   } catch (error) {
     console.error("❌ SEND MESSAGE ERROR:", error);
@@ -158,7 +173,7 @@ export const addReaction = async (req, res) => {
     }
 
     if (message.conversation && !message.conversation.members) {
-      const convo = await Conversation.findById(message.conversation._id);
+      const convo = await Conversation.findById(message.conversation);
       message.conversation.members = convo.members;
     }
 
@@ -201,8 +216,10 @@ export const addReaction = async (req, res) => {
     const populatedMessage = await Message.findById(messageId)
       .populate("sender", "name avatar")
       .populate("reactions.user", "name avatar")
-      .populate("channel", "_id");
+      .populate("channel", "_id")
+      .lean();
 
+populatedMessage.clientId = message.clientId;
     res.json(populatedMessage);
   } catch (error) {
     console.error("❌ REACTION ERROR:", error);
@@ -384,7 +401,7 @@ export const uploadFile = async (req, res) => {
       url: result.secure_url,
       public_id: result.public_id,
     });
-
+    
   } catch (error) {
     console.error("❌ UPLOAD ERROR:", error.message);
     
@@ -404,24 +421,32 @@ export const markChannelRead = async (req, res) => {
     const { channelId } = req.params;
     const { messageId } = req.body;
 
+    if (!channelId || !messageId) {
+      return res.status(400).json({
+        message: "channelId and messageId required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({
+        message: "Invalid messageId",
+      });
+    }
+
     const member = await ChannelMember.findOneAndUpdate(
-      {
-        channel: channelId,
-        user: req.user._id,
-      },
-      {
-        lastReadMessage: messageId,
-      },
+      { channel: channelId, user: req.user._id },
+      { lastReadMessage: messageId },
       { new: true }
     );
 
+    if (!member) {
+      return res.status(404).json({ message: "Channel membership not found" });
+    }
 
-// emit to channel
-req.io.to(channelId).emit("notifications_read", {
-  channelId,
-  userId: req.user._id,
-});
-
+    req.io.to(channelId).emit("notifications_read", {
+      channelId,
+      userId: req.user._id,
+    });
 
     res.json(member);
   } catch (error) {
@@ -429,6 +454,8 @@ req.io.to(channelId).emit("notifications_read", {
     res.status(500).json({ message: error.message });
   }
 };
+
+
 
 
 
@@ -480,7 +507,7 @@ export const pinMessage = async (req, res) => {
 
     /* ✅ FIX: ensure members exist */
     if (message.conversation && !message.conversation.members) {
-      const convo = await Conversation.findById(message.conversation._id);
+      const convo = await Conversation.findById(message.conversation);
       message.conversation.members = convo.members;
     }
 
@@ -529,7 +556,7 @@ export const unpinMessage = async (req, res) => {
 
     /* ✅ FIX: ensure members exist */
     if (message.conversation && !message.conversation.members) {
-      const convo = await Conversation.findById(message.conversation._id);
+      const convo = await Conversation.findById(message.conversation);
       message.conversation.members = convo.members;
     }
 
@@ -572,6 +599,7 @@ export const getPinnedMessages = async (req, res) => {
       .populate("sender", "name");
 
     res.json(messages);
+  
 
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -585,6 +613,10 @@ export const markMessageRead = async (req, res) => {
   try {
     const { messageId } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid messageId" });
+    }
+
     const message = await Message.findByIdAndUpdate(
       messageId,
       {
@@ -596,27 +628,10 @@ export const markMessageRead = async (req, res) => {
         },
       },
       { new: true }
-    )
-      .populate("channel", "_id")
-      .populate("conversation");
+    );
 
     if (!message) {
       return res.status(404).json({ message: "Message not found" });
-    }
-
-    // ✅ FIX: handle BOTH channel + DM
-    if (message.channel) {
-      req.io.to(message.channel._id.toString()).emit("message_read_update", {
-        messageId,
-        userId: req.user._id,
-      });
-    } else if (message.conversation) {
-      message.conversation.members.forEach((memberId) => {
-        req.io.to(memberId.toString()).emit("message_read_update", {
-          messageId,
-          userId: req.user._id,
-        });
-      });
     }
 
     res.json(message);
@@ -625,6 +640,7 @@ export const markMessageRead = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 
 

@@ -191,6 +191,12 @@ export const removeMember = async (req, res) => {
 
     await workspace.save();
 
+    // ✅ EMIT UPDATE
+    req.io.to(id).emit("workspace_member_removed", {
+      workspaceId: id,
+      userId,
+    });
+
     res.json({ message: "Member removed" });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -319,35 +325,59 @@ export const updateMemberRole = async (req, res) => {
   }};
 
 
-  export const promoteMember = async (req, res) => {
-    try {
-      const { id, userId } = req.params;
-      const workspace = await Workspace.findById(id);
+export const promoteMember = async (req, res) => {
+  try {
+    const { id, userId } = req.params;
+    const workspace = await Workspace.findById(id);
 
-      const memberIndex = workspace.members.findIndex(m => m.user.toString() === userId);
-      
-      if (memberIndex === -1) return res.status(404).json({ message: "Member not found" });
+    const member = workspace.members.find(
+      (m) => m.user.toString() === userId
+    );
 
-      workspace.members[memberIndex].role = "moderator";
-      await workspace.save();
-
-      res.json({ message: "User promoted" });
-    } catch (err) {
-      res.status(500).json({ message: err.message });
+    if (!member) {
+      return res.status(404).json({ message: "Member not found" });
     }
-  };
+
+    member.role = "moderator";
+
+    await workspace.save();
+
+    // ✅ EMIT
+    req.io.to(id).emit("workspace_role_updated", {
+      workspaceId: id,
+      userId,
+      role: "moderator",
+    });
+
+    res.json({ message: "User promoted" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
 
 export const demoteMember = async (req, res) => {
   try {
     const { id, userId } = req.params;
     const workspace = await Workspace.findById(id);
 
-    const memberIndex = workspace.members.findIndex(m => m.user.toString() === userId);
-    
-    if (memberIndex === -1) return res.status(404).json({ message: "Member not found" });
+    const member = workspace.members.find(
+      (m) => m.user.toString() === userId
+    );
 
-    workspace.members[memberIndex].role = "member";
+    if (!member) {
+      return res.status(404).json({ message: "Member not found" });
+    }
+
+    member.role = "member";
+
     await workspace.save();
+
+    // ✅ EMIT
+    req.io.to(id).emit("workspace_role_updated", {
+      workspaceId: id,
+      userId,
+      role: "member",
+    });
 
     res.json({ message: "User demoted" });
   } catch (err) {

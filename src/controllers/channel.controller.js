@@ -72,18 +72,27 @@ export const createChannel = async (req, res) => {
     });
 
     /* 👇 Create Channel Members */
-    const channelMembers = [
-      {
-        channel: channel._id,
-        user: userId,
-        role: "admin",
-      },
-      ...members.map((id) => ({
-        channel: channel._id,
-        user: id,
-        role: "member",
-      })),
-    ];
+const workspaceUserIds = workspace.members.map(m => m.user.toString());
+
+const validUsers = await User.find({
+  _id: {
+    $in: members.filter(id => workspaceUserIds.includes(id))
+  }
+});
+
+const channelMembers = [
+  {
+    channel: channel._id,
+    user: userId,
+    role: "admin",
+  },
+  ...validUsers.map((u) => ({
+    channel: channel._id,
+    user: u._id,
+    role: "member",
+  })),
+];
+
 
     await ChannelMember.insertMany(channelMembers);
 
@@ -425,17 +434,15 @@ export const updateChannelMembers = async (req, res) => {
       return res.status(403).json({ message: "Not allowed" });
     }
 
-    /* ➕ ADD BY ID */
+    /* ➕ BUILD MEMBERS */
     const newMembers = add.map((id) => ({
       channel: channelId,
       user: id,
       role: "member",
     }));
 
-    /* ➕ ADD BY EMAIL (🔥 NEW) */
     for (const email of addByEmail) {
       const user = await User.findOne({ email });
-
       if (!user) continue;
 
       newMembers.push({
@@ -445,7 +452,17 @@ export const updateChannelMembers = async (req, res) => {
       });
     }
 
-    await ChannelMember.insertMany(newMembers);
+    /* ✅ SAFE INSERT */
+    for (const member of newMembers) {
+      const exists = await ChannelMember.findOne({
+        channel: channelId,
+        user: member.user,
+      });
+
+      if (!exists) {
+        await ChannelMember.create(member);
+      }
+    }
 
     /* ❌ REMOVE */
     await ChannelMember.deleteMany({
@@ -460,10 +477,12 @@ export const updateChannelMembers = async (req, res) => {
     });
 
     res.json({ message: "Members updated" });
+
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
+
 
 
 
@@ -590,11 +609,14 @@ export const getChannelMembers = async (req, res) => {
     }
 
     // Flatten the response so the frontend gets a clean list
-    const formatted = members.map(m => ({
-      ...m.user,
-      role: m.role,   // from ChannelMember
-      _id: m.user._id,
-    }));
+   const formatted = members
+  .filter(m => m.user) 
+  .map(m => ({
+    ...m.user,
+    role: m.role,
+    _id: m.user._id,
+  }));
+console.log("CHANNEL MEMBERS:", formatted);
 
     res.json(formatted);
   } catch (err) {

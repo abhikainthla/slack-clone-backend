@@ -7,6 +7,10 @@ const messageSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    clientId: {
+      type: String,
+      default: null,
+    },
 
     content: {
       type: String,
