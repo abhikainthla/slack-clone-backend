@@ -1,30 +1,21 @@
 import mongoose from "mongoose";
 
 const channelMemberSchema = new mongoose.Schema({
-  
-
   channel: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Channel"
+    ref: "Channel",
+    required: true,
   },
-
   user: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "User"
+    ref: "User",
   },
-
-  role: {
-    type: String,
-    enum: ["admin", "moderator", "member"],
-    default: "member"
-  },
-
   lastReadMessage: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Message",
-    default: null
-  }
-
+    default: null,
+  },
 }, { timestamps: true });
+channelMemberSchema.index({ channel: 1, user: 1 }, { unique: true });
 
 export default mongoose.model("ChannelMember", channelMemberSchema);

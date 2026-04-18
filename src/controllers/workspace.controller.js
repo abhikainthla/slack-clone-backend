@@ -162,6 +162,13 @@ export const joinWorkspace = async (req, res) => {
 
     await workspace.save();
 
+    req.io.to(workspace._id.toString()).emit("workspace_member_added", {
+      workspaceId: workspace._id,
+      user: req.user,
+      role: "member",
+    });
+
+
     // 🔥 TEMP: COMMENT THIS
     // await Invitation.deleteOne({ _id: invite._id });
 
@@ -197,6 +204,8 @@ export const removeMember = async (req, res) => {
       userId,
     });
 
+
+
     res.json({ message: "Member removed" });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -215,6 +224,7 @@ export const updateWorkspace = async (req, res) => {
       { name, description, color },
       { new: true }
     );
+     req.io.to(req.params.id).emit("workspace_updated", workspace);
 
     res.json(workspace);
   } catch (err) {
@@ -226,12 +236,50 @@ export const updateWorkspace = async (req, res) => {
 /* DELETE WORKSPACE */
 export const deleteWorkspace = async (req, res) => {
   try {
-    await Workspace.findByIdAndDelete(req.params.id);
-    res.json({ message: "Workspace deleted" });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+    const { id } = req.params;
+
+    const workspace = await Workspace.findById(id);
+
+    if (!workspace) {
+      return res.status(404).json({
+        status: "error",
+        message: "Workspace not found",
+      });
+    }
+
+    // ✅ Check ownership
+    if (workspace.owner.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        status: "error",
+        message: "Not authorized",
+      });
+    }
+
+    await Workspace.findByIdAndDelete(id);
+    await Channel.deleteMany({ workspace: id });
+  await Notification.deleteMany({ workspace: id });
+
+
+    // ✅ FIX: use "id" instead of undefined workspaceId
+    req.io.to(id).emit("workspace_deleted", {
+      workspaceId: id,
+    });
+
+    res.json({
+      status: "success",
+      message: "Workspace deleted",
+    });
+
+  } catch (error) {
+    console.error("DELETE WORKSPACE ERROR:", error);
+
+    res.status(500).json({
+      status: "error",
+      message: error.message,
+    });
   }
 };
+
 
 
 /* MARK WORKSPACE AS READ*/
@@ -315,6 +363,13 @@ export const updateMemberRole = async (req, res) => {
 
     await workspace.save();
 
+    req.io.to(workspaceId).emit("workspace_role_updated", {
+      workspaceId,
+      userId,
+      role,
+    });
+
+
     res.json({
       message: "Role updated",
       members: workspace.members,
@@ -327,8 +382,31 @@ export const updateMemberRole = async (req, res) => {
 
 export const promoteMember = async (req, res) => {
   try {
-    const { id, userId } = req.params;
-    const workspace = await Workspace.findById(id);
+    const { id: workspaceId, userId } = req.params;
+
+    const workspace = await Workspace.findById(workspaceId);
+
+    if (!workspace) {
+      return res.status(404).json({ message: "Workspace not found" });
+    }
+
+    // ✅ CHECK ADMIN
+    const currentUser = workspace.members.find(
+      (m) => m.user.toString() === req.user._id.toString()
+    );
+
+    if (!currentUser || currentUser.role !== "admin") {
+      return res.status(403).json({
+        message: "Only admins can promote",
+      });
+    }
+
+    // ❌ PREVENT SELF PROMOTE (optional but safe)
+    if (req.user._id.toString() === userId) {
+      return res.status(400).json({
+        message: "You cannot promote yourself",
+      });
+    }
 
     const member = workspace.members.find(
       (m) => m.user.toString() === userId
@@ -338,22 +416,36 @@ export const promoteMember = async (req, res) => {
       return res.status(404).json({ message: "Member not found" });
     }
 
+    // ✅ NO DOUBLE UPDATE
+    if (member.role === "moderator") {
+      return res.status(400).json({
+        message: "User already a moderator",
+      });
+    }
+
     member.role = "moderator";
 
     await workspace.save();
 
-    // ✅ EMIT
-    req.io.to(id).emit("workspace_role_updated", {
-      workspaceId: id,
+    // ✅ SOCKET (THIS IS CORRECT)
+    req.io.to(workspaceId).emit("workspace_role_updated", {
+      workspaceId,
       userId,
       role: "moderator",
     });
 
-    res.json({ message: "User promoted" });
+    // ✅ RETURN UPDATED MEMBERS (IMPORTANT)
+    res.json({
+      message: "User promoted",
+      members: workspace.members,
+    });
+
   } catch (err) {
+    console.error("PROMOTE ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
+
 
 export const demoteMember = async (req, res) => {
   try {

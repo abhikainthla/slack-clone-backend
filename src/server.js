@@ -61,6 +61,15 @@ socket.on("get_online_users", () => {
   socket.emit("online_users_list", ids);
 });
 
+  /* =================WORKSPACE ================= */
+socket.on("join_workspace", (workspaceId) => {
+  socket.join(workspaceId);
+});
+
+socket.on("leave_workspace", (workspaceId) => {
+  socket.leave(workspaceId);
+});
+
 
   /* ================= CHANNEL ================= */
   socket.on("join_channel", (channelId) => {

@@ -4,33 +4,6 @@ import ChannelMember from "../models/ChannelMember.js";
 import { enrichChannel } from "../utils/enrichChannel.js";
 import User from "../models/User.js";
 
-/* ---------------- ROLE HELPERS (SAFE) ---------------- */
-
-const isAdmin = (channel, userId) => {
-  return (channel.roles?.admins || []).some(
-    (id) => id.toString() === userId.toString()
-  );
-};
-
-const isModerator = (channel, userId) => {
-  return (channel.roles?.moderators || []).some(
-    (id) => id.toString() === userId.toString()
-  );
-};
-
-const isMember = (channel, userId) => {
-  return (channel.members || []).some(
-    (id) => id.toString() === userId.toString()
-  );
-};
-
-const hasWorkspacePermission = (workspace, userId) => {
-  const member = workspace.members.find(
-    (m) => m.user.toString() === userId.toString()
-  );
-
-  return member && ["admin", "moderator"].includes(member.role);
-};
 
 /* ---------------- CREATE CHANNEL ---------------- */
 
@@ -40,7 +13,9 @@ export const createChannel = async (req, res) => {
     const userId = req.user._id;
 
     const workspace = await Workspace.findById(workspaceId);
-    if (!workspace) return res.status(404).json({ message: "Workspace not found" });
+    if (!workspace) {
+      return res.status(404).json({ message: "Workspace not found" });
+    }
 
     const me = workspace.members.find(
       (m) => m.user.toString() === userId.toString()
@@ -50,14 +25,12 @@ export const createChannel = async (req, res) => {
       return res.status(403).json({ message: "Not a workspace member" });
     }
 
-    /* 🔐 RULE: Private channel only ADMIN */
     if (isPrivate && me.role !== "admin") {
       return res.status(403).json({
         message: "Only admins can create private channels",
       });
     }
 
-    /* 🔐 Public channel: admin/mod allowed */
     if (!["admin", "moderator"].includes(me.role)) {
       return res.status(403).json({
         message: "Not allowed to create channels",
@@ -71,36 +44,55 @@ export const createChannel = async (req, res) => {
       isPrivate: !!isPrivate,
     });
 
-    /* 👇 Create Channel Members */
-const workspaceUserIds = workspace.members.map(m => m.user.toString());
+    const channelMembers = [
+      {
+        channel: channel._id,
+        user: userId,
+      },
+    ];
 
-const validUsers = await User.find({
-  _id: {
-    $in: members.filter(id => workspaceUserIds.includes(id))
-  }
-});
+    if (isPrivate && members.length > 0) {
+      const workspaceUserIds = workspace.members.map((m) =>
+        m.user.toString()
+      );
 
-const channelMembers = [
-  {
-    channel: channel._id,
-    user: userId,
-    role: "admin",
-  },
-  ...validUsers.map((u) => ({
-    channel: channel._id,
-    user: u._id,
-    role: "member",
-  })),
-];
+      const validUsers = await User.find({
+        _id: {
+          $in: members.filter((id) =>
+            workspaceUserIds.includes(id)
+          ),
+        },
+      });
 
+      channelMembers.push(
+        ...validUsers.map((u) => ({
+          channel: channel._id,
+          user: u._id,
+        }))
+      );
+    }
 
-    await ChannelMember.insertMany(channelMembers);
+    await ChannelMember.insertMany(channelMembers, { ordered: false });
 
-    res.status(201).json(channel);
+    if (req.io) {
+      req.io.to(workspaceId).emit("channel_created", {
+        ...channel.toObject(),
+        role: me.role,
+      });
+
+    }
+
+    res.status(201).json({
+      ...channel.toObject(),
+      role: me.role, 
+    });
+
   } catch (err) {
+    console.error("CREATE CHANNEL ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
+
 
 
 /* ---------------- GET CHANNELS ---------------- */
@@ -131,20 +123,17 @@ export const getWorkspaceChannels = async (req, res) => {
 
     /* ✅ ENRICH WITH ROLE */
     const enriched = visibleChannels.map((ch) => {
+
       const membership = memberships.find(
         (m) => m.channel?.toString() === ch._id.toString()
       );
 
       return {
         ...ch,
-        role:
-          membership?.role || // channel-specific role
-          (workspaceMember?.role === "admin"
-            ? "admin"
-            : workspaceMember?.role === "moderator"
-            ? "moderator"
-            : "member"),
+        role: workspaceMember?.role || "member"
       };
+
+
     });
 
     res.json(enriched);
@@ -195,27 +184,12 @@ export const joinChannel = async (req, res) => {
 export const leaveChannel = async (req, res) => {
   try {
     const { channelId } = req.params;
-    const userId = req.user._id.toString();
+    const userId = req.user._id;
 
-    const channel = await Channel.findById(channelId);
-
-    if (!channel) {
-      return res.status(404).json({ message: "Channel not found" });
-    }
-
-    channel.members = (channel.members || []).filter(
-      (id) => id.toString() !== userId
-    );
-
-    channel.roles.admins = (channel.roles?.admins || []).filter(
-      (id) => id.toString() !== userId
-    );
-
-    channel.roles.moderators = (channel.roles?.moderators || []).filter(
-      (id) => id.toString() !== userId
-    );
-
-    await channel.save();
+    await ChannelMember.findOneAndDelete({
+      channel: channelId,
+      user: userId,
+    });
 
     res.json({ message: "Left channel" });
   } catch (error) {
@@ -223,22 +197,41 @@ export const leaveChannel = async (req, res) => {
   }
 };
 
+
 /* ---------------- INVITE TO CHANNEL ---------------- */
 export const inviteToChannel = async (req, res) => {
   try {
     const { channelId } = req.params;
     const { userId } = req.body;
+const channel = await Channel.findById(channelId);
+if (!channel) {
+  return res.status(404).json({ message: "Channel not found" });
+}
 
-    const me = await ChannelMember.findOne({
-      channel: channelId,
-      user: req.user._id,
-    });
+const workspace = await Workspace.findById(channel.workspace);
+if (!workspace) {
+  return res.status(404).json({ message: "Workspace not found" });
+}
 
-    if (!me || !["admin", "moderator"].includes(me.role)) {
-      return res.status(403).json({
-        message: "Not allowed",
-      });
-    }
+
+const isWorkspaceMember = workspace.members.some(
+  (m) => m.user.toString() === userId
+);
+
+if (!isWorkspaceMember) {
+  return res.status(400).json({ message: "User not in workspace" });
+}
+
+
+const me = workspace.members.find(
+  (m) => m.user.toString() === req.user._id.toString()
+);
+
+if (!me || !["admin", "moderator"].includes(me.role)) {
+  return res.status(403).json({ message: "Not allowed" });
+}
+
+
 
     const exists = await ChannelMember.findOne({
       channel: channelId,
@@ -251,6 +244,12 @@ export const inviteToChannel = async (req, res) => {
         user: userId,
       });
     }
+    req.io.to(channel.workspace.toString()).emit("channel_members_updated", {
+      channelId,
+      add: [userId],
+      remove: [],
+    });
+
 
     res.json({ message: "User added to channel" });
   } catch (err) {
@@ -264,27 +263,39 @@ export const inviteToChannel = async (req, res) => {
 export const updateChannel = async (req, res) => {
   try {
     const { channelId } = req.params;
+    const updates = req.body;
 
-    const me = await ChannelMember.findOne({
-      channel: channelId,
-      user: req.user._id,
-    });
+    const channel = await Channel.findById(channelId);
+    if (!channel) {
+      return res.status(404).json({ message: "Channel not found" });
+    }
+
+    const workspace = await Workspace.findById(channel.workspace);
+
+    const me = workspace.members.find(
+      (m) => m.user.toString() === req.user._id.toString()
+    );
 
     if (!me || me.role !== "admin") {
       return res.status(403).json({ message: "Admins only" });
     }
 
-    const channel = await Channel.findByIdAndUpdate(
+    // ✅ APPLY UPDATES
+    Object.assign(channel, updates);
+    await channel.save();
+
+    // ✅ SOCKET (THIS IS THE KEY FIX)
+    req.io.to(channel.workspace.toString()).emit("channel_updated", {
       channelId,
-      req.body,
-      { new: true }
-    );
+      updates, // must match frontend
+    });
 
     res.json(channel);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
+
 
 
 export const updateChannelSettings = async (req, res) => {
@@ -301,52 +312,25 @@ export const updateChannelSettings = async (req, res) => {
     /* 🔥 GET WORKSPACE ROLE */
     const workspace = await Workspace.findById(channel.workspace);
 
+
+
     const workspaceMember = workspace.members.find(
       (m) => m.user.toString() === userId.toString()
     );
 
-    const isWorkspaceAdmin = workspaceMember?.role === "admin";
+    const role = workspaceMember?.role;
 
-    /* 🔥 GET CHANNEL ROLE */
-    let me = await ChannelMember.findOne({
-      channel: channelId,
-      user: userId,
-    });
+    if (!role) return res.status(403).json({ message: "Not allowed" });
 
-    /* ✅ AUTO-ADD WORKSPACE ADMIN INTO CHANNEL */
-    if (!me && isWorkspaceAdmin) {
-      me = await ChannelMember.create({
-        channel: channelId,
-        user: userId,
-        role: "admin",
-      });
-    }
-
-    if (!me && !isWorkspaceAdmin) {
-      return res.status(403).json({ message: "Not allowed" });
-    }
-
-    /* ---------------- PERMISSIONS ---------------- */
-
-    // ✅ Rename allowed: workspace admin OR channel mod/admin
-    if (
-      name &&
-      !isWorkspaceAdmin &&
-      !["admin", "moderator"].includes(me?.role)
-    ) {
+    // permissions
+    if (name && !["admin", "moderator"].includes(role)) {
       return res.status(403).json({ message: "Rename not allowed" });
     }
 
-    // ✅ Privacy toggle allowed: workspace admin OR channel admin
-    if (
-      typeof isPrivate !== "undefined" &&
-      !isWorkspaceAdmin &&
-      me?.role !== "admin"
-    ) {
-      return res.status(403).json({
-        message: "Only admins can change privacy",
-      });
+    if (typeof isPrivate !== "undefined" && role !== "admin") {
+      return res.status(403).json({ message: "Only admins can change privacy" });
     }
+
 
     /* ---------------- APPLY UPDATES ---------------- */
 
@@ -370,13 +354,14 @@ export const updateChannelSettings = async (req, res) => {
 
     /* 🔥 SOCKET UPDATE */
     if (req.io) {
-      req.io.to(channelId).emit("channel_updated", {
+      req.io.to(channel.workspace.toString()).emit("channel_updated", {
         channelId,
         updates: {
           name: channel.name,
           isPrivate: channel.isPrivate,
         },
       });
+
     }
 
     res.json(channel);
@@ -387,36 +372,6 @@ export const updateChannelSettings = async (req, res) => {
 
 
 
-export const updateChannelRole = async (req, res) => {
-  try {
-    const { channelId } = req.params;
-    const { userId, role } = req.body;
-
-    const me = await ChannelMember.findOne({
-      channel: channelId,
-      user: req.user._id,
-    });
-
-    if (!me || me.role !== "admin") {
-      return res.status(403).json({ message: "Admins only" });
-    }
-
-    await ChannelMember.findOneAndUpdate(
-      { channel: channelId, user: userId },
-      { role }
-    );
-
-    req.io.to(channelId).emit("channel_role_updated", {
-      channelId,
-      userId,
-      role,
-    });
-
-    res.json({ message: "Role updated" });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
 
 
 export const updateChannelMembers = async (req, res) => {
@@ -425,20 +380,32 @@ export const updateChannelMembers = async (req, res) => {
     const { add = [], remove = [], addByEmail = [] } = req.body;
     const userId = req.user._id;
 
-    const me = await ChannelMember.findOne({
-      channel: channelId,
-      user: userId,
-    });
+    const channel = await Channel.findById(channelId);
+    const workspace = await Workspace.findById(channel.workspace);
 
-    if (!me || !["admin", "moderator"].includes(me.role)) {
+    if (!channel) {
+  return res.status(404).json({ message: "Channel not found" });
+}
+
+if (!workspace) {
+  return res.status(404).json({ message: "Workspace not found" });
+}
+
+
+
+    const member = workspace.members.find(
+      (m) => m.user.toString() === req.user._id.toString()
+    );
+
+    if (!member || !["admin", "moderator"].includes(member.role)) {
       return res.status(403).json({ message: "Not allowed" });
     }
+
 
     /* ➕ BUILD MEMBERS */
     const newMembers = add.map((id) => ({
       channel: channelId,
       user: id,
-      role: "member",
     }));
 
     for (const email of addByEmail) {
@@ -448,21 +415,21 @@ export const updateChannelMembers = async (req, res) => {
       newMembers.push({
         channel: channelId,
         user: user._id,
-        role: "member",
       });
     }
 
     /* ✅ SAFE INSERT */
-    for (const member of newMembers) {
-      const exists = await ChannelMember.findOne({
-        channel: channelId,
-        user: member.user,
-      });
+    for (const newMember of newMembers) {
+  const exists = await ChannelMember.findOne({
+    channel: channelId,
+    user: newMember.user,
+  });
 
-      if (!exists) {
-        await ChannelMember.create(member);
-      }
-    }
+  if (!exists) {
+    await ChannelMember.create(newMember);
+  }
+}
+
 
     /* ❌ REMOVE */
     await ChannelMember.deleteMany({
@@ -470,11 +437,12 @@ export const updateChannelMembers = async (req, res) => {
       user: { $in: remove },
     });
 
-    req.io.to(channelId).emit("channel_members_updated", {
+    req.io.to(channel.workspace.toString()).emit("channel_members_updated", {
       channelId,
       add,
       remove,
     });
+
 
     res.json({ message: "Members updated" });
 
@@ -500,6 +468,10 @@ export const deleteChannel = async (req, res) => {
     }
 
     const workspace = await Workspace.findById(channel.workspace);
+    if (!workspace) {
+  return res.status(404).json({ message: "Workspace not found" });
+}
+
 
     const workspaceMember = workspace.members.find(
       (m) => m.user.toString() === userId.toString()
@@ -512,19 +484,22 @@ export const deleteChannel = async (req, res) => {
       user: userId,
     });
 
-    const isChannelAdmin = channelMember?.role === "admin";
 
-    // ✅ FINAL PERMISSION
-    if (!isWorkspaceAdmin && !isChannelAdmin) {
+    if (!isWorkspaceAdmin) {
       return res.status(403).json({
-        message: "Only workspace admin or channel admin can delete",
+        message: "Only workspace admin can delete",
       });
     }
+
 
     // ✅ cleanup members (important)
     await ChannelMember.deleteMany({ channel: channelId });
 
     await Channel.findByIdAndDelete(channelId);
+    req.io.to(channel.workspace.toString()).emit("channel_deleted", {
+      channelId,
+    });
+
 
     res.json({ message: "Channel deleted" });
   } catch (err) {
@@ -534,65 +509,6 @@ export const deleteChannel = async (req, res) => {
 };
 
 
-
-/* ---------------- ADD MODERATOR ---------------- */
-
-export const addModerator = async (req, res) => {
-  try {
-    const { channelId } = req.params;
-    const { userId } = req.body;
-    const currentUserId = req.user._id;
-
-    const channel = await Channel.findById(channelId);
-
-    if (!channel) {
-      return res.status(404).json({ message: "Channel not found" });
-    }
-
-    if (!isAdmin(channel, currentUserId)) {
-      return res.status(403).json({ message: "Admins only" });
-    }
-
-    if (!isModerator(channel, userId)) {
-      channel.roles.moderators.push(userId);
-      await channel.save();
-    }
-
-    res.json({ message: "User promoted to moderator" });
-  } catch (err) {
-    res.status(500).json({ message: "Failed" });
-  }
-};
-
-/* ---------------- REMOVE MODERATOR ---------------- */
-
-export const removeModerator = async (req, res) => {
-  try {
-    const { channelId } = req.params;
-    const { userId } = req.body;
-    const currentUserId = req.user._id;
-
-    const channel = await Channel.findById(channelId);
-
-    if (!channel) {
-      return res.status(404).json({ message: "Channel not found" });
-    }
-
-    if (!isAdmin(channel, currentUserId)) {
-      return res.status(403).json({ message: "Admins only" });
-    }
-
-    channel.roles.moderators = (channel.roles?.moderators || []).filter(
-      (id) => id.toString() !== userId
-    );
-
-    await channel.save();
-
-    res.json({ message: "Moderator removed" });
-  } catch (err) {
-    res.status(500).json({ message: "Failed" });
-  }
-};
 
 
 
@@ -613,9 +529,9 @@ export const getChannelMembers = async (req, res) => {
   .filter(m => m.user) 
   .map(m => ({
     ...m.user,
-    role: m.role,
     _id: m.user._id,
-  }));
+  }))
+
 console.log("CHANNEL MEMBERS:", formatted);
 
     res.json(formatted);
@@ -624,25 +540,94 @@ console.log("CHANNEL MEMBERS:", formatted);
   }
 };
 
-
-const handleRoleChange = async (id, newRole) => {
+export const addChannelMember = async (req, res) => {
   try {
-    if (!activeChannel.isPrivate) {
-      // 🌍 PUBLIC → treat as workspace role update
-      await updateWorkspaceMemberRole(activeChannel.workspace, {
-        userId: id,
-        role: newRole,
-      });
-    } else {
-      // 🔐 PRIVATE → channel role
-      await updateChannelRole(activeChannel._id, {
-        userId: id,
-        role: newRole,
-      });
+    const { channelId } = req.params;
+    const { email } = req.body;
+
+    const channel = await Channel.findById(channelId);
+    if (!channel) {
+      return res.status(404).json({ message: "Channel not found" });
     }
 
-    toast.success(`Role updated`);
+    const workspace = await Workspace.findById(channel.workspace);
+
+    const me = workspace.members.find(
+      (m) => m.user.toString() === req.user._id.toString()
+    );
+
+    if (!me || !["admin", "moderator"].includes(me.role)) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const exists = await ChannelMember.findOne({
+      channel: channelId,
+      user: user._id,
+    });
+
+    if (exists) {
+      return res.status(400).json({ message: "Already a member" });
+    }
+
+    await ChannelMember.create({
+      channel: channelId,
+      user: user._id,
+    });
+
+    // 🔥 SOCKET (instant UI sync)
+    req.io.to(channel.workspace.toString()).emit("channel_members_updated", {
+      channelId,
+      add: [user._id],
+      remove: [],
+    });
+
+    res.json({
+      message: "Member added",
+      user, 
+    });
   } catch (err) {
-    toast.error("Permission denied");
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+export const removeChannelMember = async (req, res) => {
+  try {
+    const { channelId, memberId } = req.params;
+
+    const channel = await Channel.findById(channelId);
+    if (!channel) {
+      return res.status(404).json({ message: "Channel not found" });
+    }
+
+    const workspace = await Workspace.findById(channel.workspace);
+
+    const me = workspace.members.find(
+      (m) => m.user.toString() === req.user._id.toString()
+    );
+
+    if (!me || !["admin", "moderator"].includes(me.role)) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    await ChannelMember.findOneAndDelete({
+      channel: channelId,
+      user: memberId,
+    });
+
+    req.io.to(channel.workspace.toString()).emit("channel_members_updated", {
+      channelId,
+      add: [],
+      remove: [memberId],
+    });
+
+    res.json({ message: "Member removed" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
