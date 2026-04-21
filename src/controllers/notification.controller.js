@@ -2,36 +2,59 @@ import Notification from "../models/Notification.js";
 
 export const getNotifications = async (req, res) => {
   try {
-    if (!req.user?._id) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
     const notifications = await Notification.find({
       user: req.user._id,
-      read: false,
     })
       .populate({
         path: "message",
-        populate: {
-          path: "workspace", 
-        },
-      });
+        populate: [
+          { path: "sender", select: "name avatar" },
+          { path: "channel", select: "_id name" },
+        ],
+      })
+      .sort({ createdAt: -1 })
+      .limit(20);
 
-    res.json(notifications);
-  } catch (error) {
-    console.error("GET NOTIFICATIONS ERROR:", error);
-    res.status(500).json({ message: error.message });
+    res.json({ notifications });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
 
-
-export const markWorkspaceNotificationsRead = async (req, res) => {
+/* MARK CHANNEL NOTIFICATIONS READ */
+export const markChannelNotificationsRead = async (req, res) => {
   try {
-    const { workspaceId } = req.params;
+    const { channelId } = req.params;
 
     await Notification.updateMany(
       {
         user: req.user._id,
+        channel: channelId,
+        read: false,
+      },
+      { read: true }
+    );
+
+    req.io.to(req.user._id.toString()).emit("notifications_read", {
+      channelId,
+      userId: req.user._id,
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/* MARK DM NOTIFICATIONS READ */
+export const markDMNotificationsRead = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+
+    await Notification.updateMany(
+      {
+        user: req.user._id,
+        conversation: conversationId,
         read: false,
       },
       { read: true }
@@ -39,8 +62,6 @@ export const markWorkspaceNotificationsRead = async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error("MARK READ ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
-

@@ -4,13 +4,11 @@ import {
   createWorkspace,
   deleteWorkspace,
   demoteMember,
-  filterChannels,
   generateInviteLink,
   getUserWorkspaces,
   getWorkspaceById,
   getWorkspaceMembers,
   joinWorkspace,
-  markWorkspaceRead,
   promoteMember,
   removeMember,
   updateMemberRole,
@@ -43,8 +41,6 @@ router.put("/:id/demote/:userId", protect, checkWorkspaceRole(["admin"]), demote
 router.get("/:id", protect, getWorkspaceById);
 router.post("/:workspaceId/invite-link", protect, generateInviteLink);
 router.post("/join/:token", protect, joinWorkspace);
-router.put("/:id/mark-read", protect, markWorkspaceRead);
-router.get("/:id/filter", protect, filterChannels);
 router.get("/:id/members", protect, getWorkspaceMembers);
 
 

@@ -14,6 +14,8 @@ import bookmarkRoutes from "./routes/bookmark.routes.js";
 import { apiLimiter } from "./middleware/rateLimit.middleware.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import User from "./models/User.js";
+import Workspace from "./models/Workspace.js";
+
 
 dotenv.config();
 
@@ -32,25 +34,40 @@ io.on("connection", (socket) => {
   // Use a variable to track which user this socket belongs to
   let currentUserId = null;
 
-  socket.on("user_online", async (userId) => {
-    currentUserId = userId; // Store for disconnect logic
-    
-    if (!onlineUsers.has(userId)) {
-      onlineUsers.set(userId, new Set());
-      
-      // FIRST TIME ONLINE: Update DB and notify everyone
-      await User.findByIdAndUpdate(userId, { status: "online" });
-      
-      io.emit("presence_update", {
-        userId,
-        status: "online",
-        lastSeen: null,
-      });
-    }
+socket.on("user_online", async (userId) => {
+  currentUserId = userId;
 
-    onlineUsers.get(userId).add(socket.id);
-    console.log(`User ${userId} added socket ${socket.id}. Total: ${onlineUsers.get(userId).size}`);
+  //  join personal room (for DM, direct events)
+  socket.join(userId);
+
+  //  AUTO JOIN ALL WORKSPACES (CRITICAL FIX)
+  const workspaces = await Workspace.find({
+    "members.user": userId,
+  }).select("_id");
+
+  workspaces.forEach((ws) => {
+    socket.join(ws._id.toString());
   });
+
+  console.log("✅ Joined workspaces:", workspaces.map(w => w._id));
+
+  //  presence logic
+  if (!onlineUsers.has(userId)) {
+    onlineUsers.set(userId, new Set());
+
+    await User.findByIdAndUpdate(userId, { status: "online" });
+
+    io.emit("presence_update", {
+      userId,
+      status: "online",
+      lastSeen: null,
+    });
+  }
+
+  onlineUsers.get(userId).add(socket.id);
+});
+
+
 
   socket.on("update_status", ({ userId, status }) => {
   io.emit("presence_update", { userId, status });
@@ -96,6 +113,9 @@ socket.on("leave_workspace", (workspaceId) => {
  socket.on("join_dm", (userId) => {
   socket.join(userId);
 });
+
+
+
 
 
 

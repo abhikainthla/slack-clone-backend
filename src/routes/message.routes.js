@@ -16,6 +16,8 @@ import {
   markMessageRead,
   getMessages,
   getReplies,
+  getOrCreateConversation,
+  markDMRead,
 } from "../controllers/message.controller.js";
 import upload from "../middleware/upload.js";
 
@@ -68,8 +70,9 @@ router.get("/history/:messageId", protect, getEditHistory);
 router.put("/read-message/:messageId", protect, markMessageRead);
 
 
+router.get("/conversations/:userId", protect, getOrCreateConversation);
 
-
+router.post("/read/dm/:userId", protect, markDMRead);
 
 
 

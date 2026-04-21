@@ -219,18 +219,56 @@ export const updateWorkspace = async (req, res) => {
   try {
     const { name, description, color } = req.body;
 
-    const workspace = await Workspace.findByIdAndUpdate(
-      req.params.id,
-      { name, description, color },
-      { new: true }
-    );
-     req.io.to(req.params.id).emit("workspace_updated", workspace);
+    let workspace = await Workspace.findById(req.params.id);
 
-    res.json(workspace);
+    if (!workspace) {
+      return res.status(404).json({ message: "Workspace not found" });
+    }
+
+    //  CHECK ADMIN BEFORE UPDATE
+    const member = workspace.members.find(
+      (m) => m.user.toString() === req.user._id.toString()
+    );
+
+    if (!member || member.role !== "admin") {
+      return res.status(403).json({
+        message: "Only admins can update workspace",
+      });
+    }
+
+    //  UPDATE FIELDS
+    workspace.name = name || workspace.name;
+    workspace.description = description || workspace.description;
+    workspace.color = color || workspace.color;
+
+    await workspace.save();
+
+    //  IMPORTANT: RE-FETCH WITH POPULATE
+    workspace = await Workspace.findById(req.params.id)
+      .populate("owner", "name email")
+      .populate("members.user", "_id name email username avatar status");
+
+    //  ADD ROLE (VERY IMPORTANT)
+    const updatedMember = workspace.members.find(
+      (m) => m.user._id.toString() === req.user._id.toString()
+    );
+
+    const response = {
+      ...workspace.toObject(),
+      role: updatedMember?.role || "member",
+    };
+
+    //  SOCKET
+    req.io.to(req.params.id).emit("workspace_updated", response);
+
+    res.json(response);
+
   } catch (err) {
+    console.error("UPDATE WORKSPACE ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
+
 
 
 /* DELETE WORKSPACE */
@@ -286,11 +324,10 @@ export const deleteWorkspace = async (req, res) => {
 export const markWorkspaceRead = async (req, res) => {
   try {
     await Notification.updateMany(
-      {
-        user: req.user._id,
-      },
+      { user: req.user._id, workspace: req.params.id },
       { read: true }
     );
+
 
     res.json({ message: "All notifications marked as read" });
   } catch (err) {
@@ -299,24 +336,7 @@ export const markWorkspaceRead = async (req, res) => {
 };
 
 
-/* FILTER CHANNELS*/
-export const filterChannels = async (req, res) => {
-  const { type, sort } = req.query;
 
-  let channels = await Channel.find({
-    workspace: req.params.id,
-  });
-
-  if (sort === "az") {
-    channels.sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  if (sort === "recent") {
-    channels.sort((a, b) => b.updatedAt - a.updatedAt);
-  }
-
-  res.json(channels);
-};
 
 
 /* ---------------- UPDATE MEMBER ROLE ---------------- */
