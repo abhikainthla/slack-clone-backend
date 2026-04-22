@@ -79,9 +79,10 @@ export const getUserById = async (req, res) => {
 
     res.json({
       ...user,
-      status: isOnline ? "online" : "offline",
+      status: isOnline ? "online" : user.status || "offline",
       lastSeen: user.lastSeen,
     });
+
 
 
   } catch (err) {

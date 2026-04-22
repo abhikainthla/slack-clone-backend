@@ -517,24 +517,17 @@ export const getChannelMembers = async (req, res) => {
     const { channelId } = req.params;
 
     const members = await ChannelMember.find({ channel: channelId })
-      .populate("user", "_id name email username avatar") // 👈 include avatar
+      .populate("user", "_id name email username avatar")
       .lean();
 
-    if (!members || members.length === 0) {
-      return res.status(404).json({ message: "Members not found" });
-    }
+    const formatted = members
+      .filter(m => m.user)
+      .map(m => ({
+        ...m.user,
+        _id: m.user._id,
+      }));
 
-    // Flatten the response so the frontend gets a clean list
-   const formatted = members
-  .filter(m => m.user) 
-  .map(m => ({
-    ...m.user,
-    _id: m.user._id,
-  }))
-
-console.log("CHANNEL MEMBERS:", formatted);
-
-    res.json(formatted);
+    return res.json(formatted); 
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

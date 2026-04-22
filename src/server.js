@@ -34,7 +34,35 @@ io.on("connection", (socket) => {
   // Use a variable to track which user this socket belongs to
   let currentUserId = null;
 
-socket.on("user_online", async (userId) => {
+socket.on("user_online", async (userId) => {socket.on("user_online", async (userId) => {
+  if (!userId) return;
+
+  currentUserId = userId;
+
+  socket.join(userId);
+
+  // INIT SET
+  if (!onlineUsers.has(userId)) {
+    onlineUsers.set(userId, new Set());
+
+    await User.findByIdAndUpdate(userId, {
+      status: "online",
+      lastSeen: null,
+    });
+
+    io.emit("presence_update", {
+      userId,
+      status: "online",
+      lastSeen: null,
+    });
+  }
+
+  onlineUsers.get(userId).add(socket.id);
+
+  // 🔥 SEND FULL ONLINE LIST TO THIS USER
+  socket.emit("online_users_list", Array.from(onlineUsers.keys()));
+});
+
   currentUserId = userId;
 
   //  join personal room (for DM, direct events)
@@ -65,6 +93,14 @@ socket.on("user_online", async (userId) => {
   }
 
   onlineUsers.get(userId).add(socket.id);
+});
+
+socket.on("heartbeat", async (userId) => {
+  if (!userId) return;
+
+  await User.findByIdAndUpdate(userId, {
+    lastSeen: new Date(),
+  });
 });
 
 
@@ -153,29 +189,31 @@ socket.on("leave_workspace", (workspaceId) => {
 
   /* ================= DISCONNECT ================= */
 socket.on("disconnect", async () => {
-    if (!currentUserId || !onlineUsers.has(currentUserId)) return;
+  if (!currentUserId) return;
 
-    const userSockets = onlineUsers.get(currentUserId);
-    userSockets.delete(socket.id);
+  const sockets = onlineUsers.get(currentUserId);
+  if (!sockets) return;
 
-    // ONLY IF LAST SOCKET IS GONE
-    if (userSockets.size === 0) {
-      onlineUsers.delete(currentUserId);
-      const now = new Date();
+  sockets.delete(socket.id);
 
-      await User.findByIdAndUpdate(currentUserId, {
-        status: "offline",
-        lastSeen: now,
-      });
+  if (sockets.size === 0) {
+    onlineUsers.delete(currentUserId);
 
-      io.emit("presence_update", {
-        userId: currentUserId,
-        status: "offline",
-        lastSeen: now,
-      });
-      console.log(`User ${currentUserId} is now fully offline.`);
-    }
-  });
+    const now = new Date();
+
+    await User.findByIdAndUpdate(currentUserId, {
+      status: "offline",
+      lastSeen: now,
+    });
+
+    io.emit("presence_update", {
+      userId: currentUserId,
+      status: "offline",
+      lastSeen: now,
+    });
+  }
+});
+
 });
 
 

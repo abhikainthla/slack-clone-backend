@@ -24,6 +24,10 @@ const notificationSchema = new mongoose.Schema(
 notificationSchema.index({ user: 1, read: 1 });
 notificationSchema.index({ user: 1, channel: 1 });
 notificationSchema.index({ user: 1, conversation: 1 });
+notificationSchema.index({ user: 1, createdAt: -1 });
+
+
+
 
 
 

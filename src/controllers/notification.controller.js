@@ -5,21 +5,28 @@ export const getNotifications = async (req, res) => {
     const notifications = await Notification.find({
       user: req.user._id,
     })
-      .populate({
-        path: "message",
-        populate: [
-          { path: "sender", select: "name avatar" },
-          { path: "channel", select: "_id name" },
-        ],
+        .populate({
+        path: "conversation",
+        populate: {
+          path: "members",
+          select: "_id name avatar",
+        },
       })
-      .sort({ createdAt: -1 })
-      .limit(20);
 
-    res.json({ notifications });
+      .sort({ createdAt: -1 })
+      .limit(100)
+;
+
+    res.json({
+      notifications,
+      unreadCount: notifications.filter(n => !n.read).length,
+    });
+
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
+
 
 /* MARK CHANNEL NOTIFICATIONS READ */
 export const markChannelNotificationsRead = async (req, res) => {
@@ -39,6 +46,8 @@ export const markChannelNotificationsRead = async (req, res) => {
       channelId,
       userId: req.user._id,
     });
+
+
 
     res.json({ success: true });
   } catch (err) {
@@ -60,8 +69,23 @@ export const markDMNotificationsRead = async (req, res) => {
       { read: true }
     );
 
+    req.io.to(req.user._id.toString()).emit("notifications_read", {
+      conversationId,
+      userId: req.user._id,
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+export const getUnreadNotificationCount = async (req, res) => {
+  const count = await Notification.countDocuments({
+    user: req.user._id,
+    read: false,
+  });
+
+  res.json({ count });
+};
+

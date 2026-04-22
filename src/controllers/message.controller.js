@@ -7,6 +7,7 @@ import fs from "fs";
 import Conversation from "../models/Conversation.js";
 import mongoose from "mongoose";
 import Notification from "../models/Notification.js";
+import { createMessageNotifications } from "../services/notification.service.js";
 
 /* SEND MESSAGE */
 export const sendMessage = async (req, res) => {
@@ -68,65 +69,16 @@ export const sendMessage = async (req, res) => {
 
     /* ================= NOTIFICATIONS ================= */
 
-    const notificationMap = new Map();
-
-    // CHANNEL
-    if (channelId) {
-      const members = await ChannelMember.find({
-        channel: channelId,
-        user: { $ne: req.user._id },
-      });
-
-      members.forEach((m) => {
-        notificationMap.set(m.user.toString(), {
-          user: m.user,
-          type: "channel",
-          channel: channelId,
-        });
-      });
-    }
-
-    // MENTIONS (override)
-    mentionedUsers.forEach((id) => {
-      if (id.toString() === req.user._id.toString()) return;
-
-      notificationMap.set(id.toString(), {
-        user: id,
-        type: "mention",
-        channel: channelId || null,
-        conversation: conversationId || null,
-      });
+    await createMessageNotifications({
+      message: populatedMessage,
+      senderId: req.user._id,
+      channelId,
+      conversationId,
+      mentions: mentionedUsers,
+      receiverId,
+      io: req.io,
     });
 
-    // DM
-    if (receiverId && receiverId.toString() !== req.user._id.toString()) {
-      notificationMap.set(receiverId.toString(), {
-        user: receiverId,
-        type: "dm",
-        conversation: conversationId,
-      });
-    }
-
-    const notificationsToInsert = Array.from(notificationMap.values()).map((n) => ({
-      ...n,
-      message: message._id,
-    }));
-
-    if (notificationsToInsert.length > 0) {
-      const created = await Notification.insertMany(notificationsToInsert);
-
-      created.forEach((n) => {
-        req.io.to(n.user.toString()).emit("new_notification", {
-          _id: n._id,
-          type: n.type,
-          read: false,
-          message: populatedMessage,
-          channel: n.channel || null,
-          conversation: n.conversation || null,
-          createdAt: n.createdAt,
-        });
-      });
-    }
 
     /* ================= SOCKET MESSAGE ================= */
 
@@ -439,7 +391,6 @@ export const markChannelRead = async (req, res) => {
     const { channelId } = req.params;
     const { messageId } = req.body;
 
-    // ❗ FIX: validate ObjectId
     if (!mongoose.Types.ObjectId.isValid(messageId)) {
   return res.json({ success: false }); 
 }
@@ -465,6 +416,14 @@ export const markChannelRead = async (req, res) => {
           },
         },
       }
+    );
+    await Notification.updateMany(
+      {
+        user: req.user._id,
+        channel: channelId,
+        read: false,
+      },
+      { read: true }
     );
 
     req.io.to(channelId).emit("channel_read_update", {
@@ -506,10 +465,27 @@ export const markDMRead = async (req, res) => {
     conversation.lastRead.set(req.user._id.toString(), lastMessage._id);
 
     await conversation.save();
+        await Notification.updateMany(
+      {
+        user: req.user._id,
+        conversation: conversation._id,
+        read: false,
+      },
+      { read: true }
+    );
 
-    req.io.to(req.user._id.toString()).emit("dm_read_update", {
-      userId,
+
+
+
+    const members = conversation.members;
+
+    members.forEach((id) => {
+      req.io.to(id.toString()).emit("dm_read_update", {
+        userId: req.user._id,
+        conversationId: conversation._id,
+      });
     });
+
 
     res.json({ success: true });
   } catch (err) {

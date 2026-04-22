@@ -18,6 +18,8 @@ import {
   getReplies,
   getOrCreateConversation,
   markDMRead,
+  getChannelUnreadCounts,
+  getDMUnreadCounts,
 } from "../controllers/message.controller.js";
 import upload from "../middleware/upload.js";
 
@@ -32,6 +34,10 @@ router.get("/search", protect, searchMessages);
 
 /* GET MESSAGES */
 router.get("/", protect, getMessages);
+
+router.get("/unread/channel", protect, getChannelUnreadCounts);
+router.get("/unread/dm", protect, getDMUnreadCounts);
+
 
 
 /* ADD REACTIONS */
@@ -73,6 +79,7 @@ router.put("/read-message/:messageId", protect, markMessageRead);
 router.get("/conversations/:userId", protect, getOrCreateConversation);
 
 router.post("/read/dm/:userId", protect, markDMRead);
+
 
 
 
