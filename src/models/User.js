@@ -83,7 +83,19 @@ const userSchema = new mongoose.Schema(
     friends: [
       { type: mongoose.Schema.Types.ObjectId, ref: "User" }
     ],
+      resetPasswordToken: String,
+      resetPasswordExpire: Date,
+
+      isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
+
+    emailVerificationToken: String,
+    emailVerificationExpire: Date,
   },
+
+
   { timestamps: true }
 );
 
