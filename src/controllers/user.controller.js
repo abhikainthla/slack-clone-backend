@@ -157,27 +157,40 @@ export const selectAvatar = async (req, res) => {
 
 export const completeOnboarding = async (req, res) => {
   try {
-    const { username, bio, status, customStatus } = req.body;
+    const { username, bio } = req.body;
 
-    const updates = {
-      username,
-      bio,
-      status,
-      customStatus,
-      isOnboarded: true,
-    };
+
+    if (!req.user?._id) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (!username) {
+      return res.status(400).json({ message: "Username required" });
+    }
+
+    const existing = await User.findOne({ username });
+    if (existing && existing._id.toString() !== req.user._id.toString()) {
+      return res.status(400).json({ message: "Username already taken" });
+    }
 
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      updates,
+      {
+        username,
+        bio: bio || "",
+        isOnboarded: true,
+      },
       { new: true }
     ).select("-password");
 
     res.json(user);
+
   } catch (err) {
-    res.status(500).json({ message: "Onboarding failed" });
+    console.error("❌ ONBOARDING ERROR:", err);
+    res.status(500).json({ message: err.message });
   }
 };
+
 
 
 export const blockUser = async (req, res) => {

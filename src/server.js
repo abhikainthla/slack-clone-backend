@@ -15,10 +15,9 @@ import { apiLimiter } from "./middleware/rateLimit.middleware.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import User from "./models/User.js";
 import Workspace from "./models/Workspace.js";
+import path from "path";
 
-
-dotenv.config();
-
+dotenv.config({ path: path.resolve(".env") });
 const app = express();
 const server = http.createServer(app);
 

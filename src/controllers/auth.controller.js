@@ -1,5 +1,6 @@
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import generateToken from "../utils/generateToken.js";
 import { generateResetToken } from "../utils/generateResetToken.js";
 import { sendEmail } from "../utils/sendEmail.js";
@@ -30,7 +31,10 @@ export const register = async (req, res) => {
       emailVerificationExpire: Date.now() + 24 * 60 * 60 * 1000, // 24h
     });
 
-    const verifyUrl = `${process.env.CLIENT_URL}/verify-email/${token}`;
+    const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+
+    const verifyUrl = `${CLIENT_URL}/verify-email/${token}`;
+
 
     await sendEmail({
       to: user.email,
@@ -51,20 +55,19 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!user.isEmailVerified) {
-    return res.status(401).json({
-      message: "Please verify your email before logging in",
-    });
-}
-
 
     const user = await User.findOne({ email });
 
     if (!user) {
-      return res.status(400).json({
-        message: "Invalid credentials",
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
+
+    if (!user.isEmailVerified) {
+      return res.status(401).json({
+        message: "Please verify your email before logging in",
       });
     }
+
 
     const isMatch = await bcrypt.compare(password, user.password);
 
@@ -240,8 +243,13 @@ export const resendVerificationEmail = async (req, res) => {
     await sendEmail({
       to: user.email,
       subject: "Verify your email",
-      text: `Click to verify your email: ${verifyUrl}`,
+      html: `
+        <h2>Welcome to SynCube 🚀</h2>
+        <p>Please verify your email:</p>
+        <a href="${verifyUrl}" style="color:blue;">Verify Email</a>
+      `,
     });
+
 
     res.json({ message: "Verification email resent" });
 
