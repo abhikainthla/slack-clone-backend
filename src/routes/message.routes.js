@@ -20,6 +20,7 @@ import {
   markDMRead,
   getChannelUnreadCounts,
   getDMUnreadCounts,
+  getThreadUnreadCount,
 } from "../controllers/message.controller.js";
 import upload from "../middleware/upload.js";
 
@@ -79,6 +80,8 @@ router.put("/read-message/:messageId", protect, markMessageRead);
 router.get("/conversations/:userId", protect, getOrCreateConversation);
 
 router.post("/read/dm/:userId", protect, markDMRead);
+
+router.get("/threads/unread/:messageId", protect, getThreadUnreadCount);
 
 
 

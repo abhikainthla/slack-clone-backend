@@ -125,9 +125,19 @@ export const getMessages = async (req, res) => {
       return res.status(400).json({ message: "channelId or userId required" });
     }
 
-    const messages = await Message.find(query)
-      .populate("sender", "name avatar _id")
-      .sort({ createdAt: 1 });
+   const messages = await Message.find(query)
+  .populate("sender", "name avatar _id")
+  .sort({ createdAt: 1 })
+  .lean();
+
+    for (let msg of messages) {
+      const count = await Message.countDocuments({
+        parentMessage: msg._id,
+      });
+
+      msg.replyCount = count; 
+    }
+
 
     res.json(messages);
   } catch (err) {
@@ -307,6 +317,20 @@ export const replyToMessage = async (req, res) => {
       channel: channelId || null,
       conversation: conversationId,
     });
+    const parent = await Message.findById(messageId);
+
+    if (parent && parent.sender.toString() !== req.user._id.toString()) {
+      const notification = await Notification.create({
+        user: parent.sender,
+        type: "thread", 
+        message: reply._id,
+        channel: channelId || null,
+        conversation: conversationId || null,
+      });
+
+      req.io.to(parent.sender.toString()).emit("new_notification", notification);
+    }
+
 
     const populated = await Message.findById(reply._id)
       .populate("sender", "name avatar");
@@ -315,6 +339,7 @@ export const replyToMessage = async (req, res) => {
     // prevent emitting twice
     if (channelId) {
       req.io.to(channelId).emit("receive_reply", populated);
+      req.io.to(channelId).emit("receive_message", populated); 
     } else if (conversationId) {
       const convo = await Conversation.findById(conversationId);
       convo.members.forEach((id) => {
@@ -322,7 +347,27 @@ export const replyToMessage = async (req, res) => {
           req.io.to(id.toString()).emit("receive_reply", populated);
         }
       });
-    }
+    }const totalReplies = await Message.countDocuments({
+  parentMessage: messageId,
+});
+
+if (channelId) {
+  req.io.to(channelId).emit("reply_count_update", {
+    messageId,
+    replyCount: totalReplies,
+  });
+} else if (conversationId) {
+  const convo = await Conversation.findById(conversationId);
+  convo.members.forEach((id) => {
+    req.io.to(id.toString()).emit("reply_count_update", {
+      messageId,
+      replyCount: totalReplies,
+    });
+  });
+}
+
+
+
 
 
     res.json(populated);
@@ -343,6 +388,20 @@ export const getReplies = async (req, res) => {
   res.json(replies);
 };
 
+export const getThreadUnreadCount = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+
+    const count = await Message.countDocuments({
+      parentMessage: messageId,
+      "readBy.user": { $ne: req.user._id },
+    });
+
+    res.json({ count });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
 
 
 /* UPLOAD FILES */

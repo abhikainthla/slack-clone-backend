@@ -6,7 +6,7 @@ const notificationSchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ["channel", "dm", "mention"],
+      enum: ["channel", "dm", "mention", "thread"],
       required: true,
     },
 

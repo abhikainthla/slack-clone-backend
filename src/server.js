@@ -13,6 +13,7 @@ import onlineUsers from "./sockets/presence.js";
 import bookmarkRoutes from "./routes/bookmark.routes.js";
 import { apiLimiter } from "./middleware/rateLimit.middleware.js";
 import notificationRoutes from "./routes/notification.routes.js";
+import healthRoute from "./routes/health.route.js";
 import User from "./models/User.js";
 import Workspace from "./models/Workspace.js";
 import path from "path";
@@ -33,14 +34,22 @@ io.on("connection", (socket) => {
   // Use a variable to track which user this socket belongs to
   let currentUserId = null;
 
-socket.on("user_online", async (userId) => {socket.on("user_online", async (userId) => {
+socket.on("user_online", async (userId) => {
   if (!userId) return;
 
   currentUserId = userId;
 
   socket.join(userId);
 
-  // INIT SET
+  // join workspaces
+  const workspaces = await Workspace.find({
+    "members.user": userId,
+  }).select("_id");
+
+  workspaces.forEach((ws) => {
+    socket.join(ws._id.toString());
+  });
+
   if (!onlineUsers.has(userId)) {
     onlineUsers.set(userId, new Set());
 
@@ -58,41 +67,9 @@ socket.on("user_online", async (userId) => {socket.on("user_online", async (user
 
   onlineUsers.get(userId).add(socket.id);
 
-  // 🔥 SEND FULL ONLINE LIST TO THIS USER
   socket.emit("online_users_list", Array.from(onlineUsers.keys()));
 });
 
-  currentUserId = userId;
-
-  //  join personal room (for DM, direct events)
-  socket.join(userId);
-
-  //  AUTO JOIN ALL WORKSPACES (CRITICAL FIX)
-  const workspaces = await Workspace.find({
-    "members.user": userId,
-  }).select("_id");
-
-  workspaces.forEach((ws) => {
-    socket.join(ws._id.toString());
-  });
-
-  console.log("✅ Joined workspaces:", workspaces.map(w => w._id));
-
-  //  presence logic
-  if (!onlineUsers.has(userId)) {
-    onlineUsers.set(userId, new Set());
-
-    await User.findByIdAndUpdate(userId, { status: "online" });
-
-    io.emit("presence_update", {
-      userId,
-      status: "online",
-      lastSeen: null,
-    });
-  }
-
-  onlineUsers.get(userId).add(socket.id);
-});
 
 socket.on("heartbeat", async (userId) => {
   if (!userId) return;
@@ -219,7 +196,7 @@ socket.on("disconnect", async () => {
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL, // your frontend URL
+    origin: process.env.FRONTEND_URL || "*",
     credentials: true,
   })
 );
@@ -236,6 +213,7 @@ app.use("/api/messages", messageRoutes);
 app.use("/api/bookmarks", bookmarkRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api", apiLimiter);
+app.use("/api/health", healthRoute);
 
 
 
