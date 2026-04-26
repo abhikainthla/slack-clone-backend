@@ -194,12 +194,28 @@ socket.on("disconnect", async () => {
 
 
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://slack-clone-frontend-blue.vercel.app",
+  "https://slack-clone-frontend-psi.vercel.app"
+];
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "*",
+    origin: function (origin, callback) {
+      // allow requests with no origin (mobile apps, curl, postman)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      } else {
+        return callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   })
 );
+
 app.use(express.json());
 app.use((req, res, next) => {
   req.io = io;
